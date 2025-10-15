@@ -1,0 +1,593 @@
+---
+title: "Lesson 13: lubridate for Time Series Data"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Parse dates and times from various formats
+2. Extract components from dates (year, month, day, etc.)
+3. Perform date arithmetic (add days, calculate intervals)
+4. Work with time zones
+5. Calculate time elapsed in experiments
+6. Analyze time-series biological data
+7. Handle datetime data in experiments and longitudinal studies
+
+## Why lubridate for Biology?
+
+Biological experiments often involve time:
+- **Sample collection**: When was each sample taken?
+- **Longitudinal studies**: Patient visits over months/years
+- **Time-course experiments**: Gene expression at 0h, 2h, 4h, 8h...
+- **Cell passages**: Track culture age and passage dates
+- **Circadian rhythms**: Time-of-day effects
+- **Batch effects**: Were samples processed on different days?
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(lubridate)  # Note: lubridate is not auto-loaded by tidyverse
+
+# Current date/time
+now()
+today()
+```
+
+## Parsing Dates and Times
+
+### Creating Dates from Strings
+
+```{r parse-dates}
+# Different formats
+ymd("2024-03-15")          # Year-Month-Day
+mdy("03/15/2024")          # Month/Day/Year
+dmy("15-03-2024")          # Day-Month-Year
+
+# Works with various separators
+ymd("2024/03/15")
+ymd("20240315")
+
+# Parse from messy strings
+ymd("Sample collected on 2024-03-15")
+```
+
+### Creating Date-Times
+
+```{r parse-datetimes}
+# Add hours, minutes, seconds
+ymd_hms("2024-03-15 14:30:45")
+ymd_hm("2024-03-15 14:30")
+
+# Different formats
+mdy_hms("03/15/2024 14:30:45")
+
+# From timestamp
+sample_time <- ymd_hms("2024-03-15 09:30:00")
+sample_time
+```
+
+### Parsing Time Zones
+
+```{r timezones}
+# Specify timezone
+ymd_hms("2024-03-15 14:30:00", tz = "America/New_York")
+ymd_hms("2024-03-15 14:30:00", tz = "UTC")
+ymd_hms("2024-03-15 14:30:00", tz = "America/Los_Angeles")
+
+# Convert between time zones
+eastern_time <- ymd_hms("2024-03-15 14:30:00", tz = "America/New_York")
+with_tz(eastern_time, "America/Los_Angeles")
+with_tz(eastern_time, "UTC")
+```
+
+## Extracting Components
+
+```{r extract-components}
+sample_date <- ymd_hms("2024-03-15 14:30:45")
+
+# Date components
+year(sample_date)
+month(sample_date)
+day(sample_date)
+wday(sample_date)          # Day of week (1 = Sunday)
+wday(sample_date, label = TRUE)  # Name
+yday(sample_date)          # Day of year
+
+# Time components
+hour(sample_date)
+minute(sample_date)
+second(sample_date)
+
+# Useful derived values
+week(sample_date)          # Week of year
+quarter(sample_date)       # Quarter
+```
+
+## Date Arithmetic
+
+### Adding and Subtracting Time
+
+```{r date-arithmetic}
+experiment_start <- ymd("2024-03-15")
+
+# Add time
+experiment_start + days(7)
+experiment_start + weeks(2)
+experiment_start + months(1)
+experiment_start + years(1)
+
+# Subtract time
+experiment_start - days(3)
+
+# Combine
+experiment_start + days(7) + hours(3)
+
+# Sequences of dates
+seq(experiment_start, experiment_start + days(6), by = "day")
+```
+
+### Intervals and Durations
+
+```{r intervals}
+# Interval between two dates
+start_date <- ymd("2024-03-01")
+end_date <- ymd("2024-03-15")
+
+interval(start_date, end_date)
+
+# Time elapsed
+time_diff <- end_date - start_date
+time_diff
+
+# As different units
+as.numeric(time_diff, units = "days")
+as.numeric(time_diff, units = "weeks")
+
+# Duration
+duration_days <- ddays(14)
+start_date + duration_days
+```
+
+## Practical Example: Sample Collection Timeline
+
+```{r sample-timeline}
+# Patient sample collection over time
+samples <- tibble(
+  sample_id = paste0("S", 1:20),
+  collection_date = seq(ymd("2024-01-15"),
+                        ymd("2024-02-03"),
+                        by = "day"),
+  patient_id = rep(paste0("P", 1:4), each = 5),
+  visit_number = rep(1:5, times = 4)
+)
+
+samples %>%
+  mutate(
+    day_of_week = wday(collection_date, label = TRUE),
+    month = month(collection_date, label = TRUE),
+    week_number = week(collection_date)
+  )
+```
+
+## Time-Course Experiment
+
+```{r time-course}
+# Gene expression time course
+time_course <- tibble(
+  gene = rep(c("Gene_A", "Gene_B", "Gene_C"), each = 6),
+  timepoint = rep(c(0, 2, 4, 8, 12, 24), times = 3),
+  expression = c(
+    # Gene_A: increases
+    100, 120, 180, 350, 500, 600,
+    # Gene_B: decreases
+    500, 450, 350, 200, 100, 80,
+    # Gene_C: stable
+    200, 210, 205, 195, 200, 198
+  )
+) %>%
+  mutate(
+    # If experiment started at specific time
+    experiment_start = ymd_hms("2024-03-15 09:00:00"),
+    sample_time = experiment_start + hours(timepoint),
+    time_of_day = hour(sample_time)
+  )
+
+time_course
+
+# Plot by actual time
+ggplot(time_course, aes(x = sample_time, y = expression, color = gene)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Gene Expression Time Course",
+       x = "Sample Time",
+       y = "Expression Level",
+       color = "Gene") +
+  theme_minimal()
+```
+
+## Longitudinal Patient Study
+
+```{r longitudinal-study}
+# Patient visits over months
+patient_visits <- tibble(
+  patient_id = rep(paste0("P", 1:5), each = 4),
+  visit = rep(1:4, times = 5),
+  visit_date = ymd("2023-01-01") + months(rep(c(0, 3, 6, 12), times = 5)) +
+               days(sample(0:7, 20, replace = TRUE)),  # slight variation
+  viral_load = rnorm(20, 10000, 3000) * exp(-rep(0:3, times = 5) * 0.3)
+)
+
+# Calculate time since baseline
+patient_visits <- patient_visits %>%
+  group_by(patient_id) %>%
+  mutate(
+    baseline_date = first(visit_date),
+    days_since_baseline = as.numeric(visit_date - baseline_date),
+    months_since_baseline = days_since_baseline / 30.44
+  ) %>%
+  ungroup()
+
+patient_visits
+
+# Plot
+ggplot(patient_visits, aes(x = months_since_baseline, y = viral_load,
+                           color = patient_id, group = patient_id)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Viral Load Over Time",
+       x = "Months Since Baseline",
+       y = "Viral Load (copies/mL)",
+       color = "Patient") +
+  theme_minimal()
+```
+
+## Cell Culture Passage Tracking
+
+```{r cell-culture}
+# Track cell passages
+passages <- tibble(
+  passage_number = 1:10,
+  passage_date = ymd("2024-01-15") + days(c(0, 3, 6, 9, 13, 16, 20, 23, 27, 30)),
+  cell_count = c(1e6, 3e6, 7e6, 1.5e7, 3e7, 6e7, 1.2e8, 2.5e8, 5e8, 1e9)
+)
+
+passages <- passages %>%
+  mutate(
+    days_in_culture = as.numeric(passage_date - first(passage_date)),
+    days_since_last_passage = c(0, diff(passage_date)),
+    doubling_time = days_since_last_passage /
+                    log2(cell_count / lag(cell_count))
+  )
+
+passages
+
+# Visualize
+ggplot(passages, aes(x = passage_date, y = cell_count)) +
+  geom_line(size = 1, color = "steelblue") +
+  geom_point(size = 3) +
+  scale_y_log10(labels = scales::scientific) +
+  labs(title = "Cell Culture Growth",
+       x = "Date",
+       y = "Cell Count (log scale)") +
+  theme_minimal()
+```
+
+## Batch Effects by Date
+
+```{r batch-effects}
+# Samples processed on different days
+sample_processing <- tibble(
+  sample_id = paste0("S", 1:30),
+  processing_date = sample(seq(ymd("2024-03-01"),
+                               ymd("2024-03-05"),
+                               by = "day"),
+                           30, replace = TRUE),
+  measurement = rnorm(30, 100, 15)
+)
+
+# Check for batch effects
+sample_processing <- sample_processing %>%
+  mutate(
+    processing_day = wday(processing_date, label = TRUE),
+    batch = as.factor(processing_date)
+  )
+
+# Plot by batch
+ggplot(sample_processing, aes(x = batch, y = measurement)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  labs(title = "Potential Batch Effect by Processing Date",
+       x = "Processing Date",
+       y = "Measurement") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Statistical test
+summary(aov(measurement ~ batch, data = sample_processing))
+```
+
+## Circadian Rhythm Analysis
+
+```{r circadian}
+# Samples collected at different times of day
+circadian_samples <- tibble(
+  sample_id = paste0("S", 1:48),
+  collection_time = ymd_hms("2024-03-15 00:00:00") + hours(rep(0:23, 2)),
+  melatonin_level = 10 + 8 * sin((rep(0:23, 2) - 20) * pi / 12) +
+                    rnorm(48, 0, 1)
+) %>%
+  mutate(
+    hour_of_day = hour(collection_time),
+    time_category = case_when(
+      hour_of_day >= 6 & hour_of_day < 12 ~ "Morning",
+      hour_of_day >= 12 & hour_of_day < 18 ~ "Afternoon",
+      hour_of_day >= 18 & hour_of_day < 22 ~ "Evening",
+      TRUE ~ "Night"
+    ),
+    time_category = factor(time_category,
+                          levels = c("Morning", "Afternoon", "Evening", "Night"))
+  )
+
+# Plot circadian pattern
+ggplot(circadian_samples, aes(x = hour_of_day, y = melatonin_level)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", color = "blue", size = 1) +
+  scale_x_continuous(breaks = seq(0, 23, 3)) +
+  labs(title = "Circadian Melatonin Rhythm",
+       x = "Hour of Day",
+       y = "Melatonin Level (pg/mL)") +
+  theme_minimal()
+```
+
+## Calculating Experiment Duration
+
+```{r experiment-duration}
+# Complex experiment with multiple steps
+experiment_log <- tibble(
+  step = c("Sample preparation", "RNA extraction", "Library prep",
+           "Sequencing", "Data analysis"),
+  start_time = ymd_hms(c(
+    "2024-03-15 09:00:00",
+    "2024-03-15 11:30:00",
+    "2024-03-15 14:00:00",
+    "2024-03-16 09:00:00",
+    "2024-03-18 10:00:00"
+  )),
+  end_time = ymd_hms(c(
+    "2024-03-15 11:30:00",
+    "2024-03-15 14:00:00",
+    "2024-03-15 17:30:00",
+    "2024-03-17 15:00:00",
+    "2024-03-20 16:00:00"
+  ))
+)
+
+experiment_log <- experiment_log %>%
+  mutate(
+    duration = end_time - start_time,
+    duration_hours = as.numeric(duration, units = "hours"),
+    duration_days = as.numeric(duration, units = "days"),
+    wait_time = start_time - lag(end_time),
+    wait_hours = as.numeric(wait_time, units = "hours")
+  )
+
+experiment_log
+
+# Total experiment time
+total_duration <- last(experiment_log$end_time) - first(experiment_log$start_time)
+cat("Total experiment duration:", as.numeric(total_duration, units = "days"), "days\n")
+```
+
+## Working with Incomplete Dates
+
+```{r incomplete-dates}
+# Sometimes you only have month and year
+publication_dates <- c("2023-01", "2023-03", "2023-12", "2024-02")
+
+# Parse as first day of month
+parsed_dates <- ym(publication_dates)
+parsed_dates
+
+# Create tibble
+publications <- tibble(
+  paper_id = paste0("Paper_", 1:4),
+  pub_date = parsed_dates
+) %>%
+  mutate(
+    year = year(pub_date),
+    month = month(pub_date, label = TRUE),
+    quarter = quarter(pub_date)
+  )
+
+publications
+```
+
+## Floor, Ceiling, and Round Dates
+
+```{r round-dates}
+sample_time <- ymd_hms("2024-03-15 14:37:28")
+
+# Round to different units
+floor_date(sample_time, "day")    # Start of day
+floor_date(sample_time, "month")  # Start of month
+ceiling_date(sample_time, "day")  # Next day
+round_date(sample_time, "hour")   # Nearest hour
+
+# Useful for grouping
+samples_detailed <- tibble(
+  sample_id = paste0("S", 1:100),
+  exact_time = ymd_hms("2024-03-15 08:00:00") +
+               minutes(sample(0:480, 100, replace = TRUE))
+) %>%
+  mutate(
+    hour_block = floor_date(exact_time, "hour"),
+    day = floor_date(exact_time, "day")
+  )
+
+# Count samples per hour
+samples_detailed %>%
+  count(hour_block)
+```
+
+## Real-World Example: Clinical Trial
+
+```{r clinical-trial}
+# Clinical trial with screening, treatment, and follow-up
+clinical_trial <- tibble(
+  patient_id = paste0("PT", str_pad(1:20, 3, pad = "0")),
+  screening_date = ymd("2023-06-01") + days(sample(0:30, 20, replace = TRUE)),
+  treatment_start = screening_date + days(sample(7:14, 20, replace = TRUE)),
+  treatment_end = treatment_start + days(84),  # 12 weeks
+  followup_1 = treatment_end + weeks(4),
+  followup_2 = treatment_end + weeks(12),
+  followup_3 = treatment_end + weeks(24)
+)
+
+# Calculate various intervals
+clinical_trial <- clinical_trial %>%
+  mutate(
+    screen_to_treatment = as.numeric(treatment_start - screening_date),
+    treatment_duration = as.numeric(treatment_end - treatment_start),
+    total_followup = as.numeric(followup_3 - treatment_end),
+    study_duration = as.numeric(followup_3 - screening_date),
+
+    # Check protocol compliance
+    on_schedule = screen_to_treatment <= 14,
+    completed_treatment = treatment_duration == 84
+  )
+
+# Summary
+clinical_trial %>%
+  summarise(
+    n_patients = n(),
+    mean_screen_to_tx = mean(screen_to_treatment),
+    compliance_rate = mean(on_schedule),
+    completion_rate = mean(completed_treatment)
+  )
+```
+
+## Calculating Age
+
+```{r calculate-age}
+# Patient ages
+patients <- tibble(
+  patient_id = paste0("P", 1:10),
+  birth_date = ymd("1990-01-01") + years(sample(0:30, 10, replace = TRUE)),
+  enrollment_date = ymd("2024-03-15")
+)
+
+patients <- patients %>%
+  mutate(
+    age_at_enrollment = interval(birth_date, enrollment_date) / years(1),
+    age_years = floor(age_at_enrollment),
+    age_category = case_when(
+      age_years < 30 ~ "Young",
+      age_years < 50 ~ "Middle",
+      TRUE ~ "Senior"
+    )
+  )
+
+patients
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Parse these messy date strings
+dates <- c("March 15, 2024", "2024-03-15", "15/03/2024")
+# Hint: Use different parsing functions
+
+
+# Exercise 2: Calculate how many days until your next birthday
+
+
+# Exercise 3: Create a sequence of dates for a 30-day experiment,
+# starting tomorrow, sampling every 3 days
+
+
+# Exercise 4: Given treatment_start and patient data, calculate which patients
+# started treatment on a weekend (Saturday or Sunday)
+
+
+# Exercise 5: Calculate the average time between passages in the cell
+# culture data. Is it consistent?
+
+
+```
+
+## Common Date/Time Operations Summary
+
+```{r summary-table, echo=FALSE}
+tibble(
+  Function = c("ymd()", "ymd_hms()", "today()", "now()",
+               "year()", "month()", "day()", "hour()",
+               "wday()", "+days()", "interval()", "with_tz()"),
+  Purpose = c("Parse date", "Parse datetime", "Current date", "Current datetime",
+              "Extract year", "Extract month", "Extract day", "Extract hour",
+              "Day of week", "Add days", "Create interval", "Convert timezone"),
+  Example = c('ymd("2024-03-15")', 'ymd_hms("2024-03-15 14:30:00")',
+              'today()', 'now()', 'year(date)', 'month(date)',
+              'day(date)', 'hour(datetime)', 'wday(date)',
+              'date + days(7)', 'interval(start, end)', 'with_tz(time, "UTC")')
+) %>%
+  knitr::kable()
+```
+
+## Common Pitfalls
+
+### 1. Time Zones
+
+```{r pitfall-tz}
+# Be explicit about time zones!
+time1 <- ymd_hms("2024-03-15 14:00:00", tz = "America/New_York")
+time2 <- ymd_hms("2024-03-15 14:00:00", tz = "America/Los_Angeles")
+
+time1 == time2  # FALSE! Same clock time, different actual time
+```
+
+### 2. Date Arithmetic Units
+
+```{r pitfall-units}
+date <- ymd("2024-01-31")
+
+# Adding months can be tricky
+date + months(1)  # Feb 29 (leap year!)
+date + months(2)  # March 31
+
+# Use %m+% for month arithmetic
+date %m+% months(1)  # Stays at end of month
+```
+
+## Key Takeaways
+
+- lubridate makes date/time manipulation intuitive
+- Parse dates with `ymd()`, `mdy()`, `dmy()`, etc.
+- Add time with `+days()`, `+hours()`, etc.
+- Extract components with `year()`, `month()`, `day()`, etc.
+- Calculate intervals between dates
+- Handle time zones explicitly
+- Essential for time-series and longitudinal studies
+- Critical for tracking experimental timelines
+
+## Next Steps
+
+In Lesson 14, we'll learn advanced tidyr techniques including nested data and list columns!
+
+---
+
+**Homework:**
+
+1. Create a dataset of your own sample collection dates
+2. Calculate time intervals between samples
+3. Check for day-of-week or batch effects
+4. Create a timeline visualization
+5. Calculate summary statistics by time period (week, month, etc.)

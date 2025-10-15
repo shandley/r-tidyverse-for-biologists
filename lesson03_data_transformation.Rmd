@@ -1,0 +1,463 @@
+---
+title: "Lesson 3: Data Transformation with dplyr"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Filter rows based on conditions using `filter()`
+2. Select specific columns using `select()`
+3. Create new columns using `mutate()`
+4. Sort data using `arrange()`
+5. Chain operations together using the pipe operator `%>%`
+6. Apply these skills to answer biological questions
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(palmerpenguins)
+
+# Load our penguin data
+penguins <- penguins
+```
+
+## The dplyr Package
+
+dplyr provides a grammar for data manipulation. Think of it as verbs for data:
+
+- `filter()`: keep rows that match a condition
+- `select()`: keep specific columns
+- `mutate()`: create new columns
+- `arrange()`: sort rows
+- `summarise()`: calculate summary statistics (next lesson!)
+- `group_by()`: perform operations by groups (next lesson!)
+
+## The Pipe Operator: %>%
+
+The pipe `%>%` passes the result from one function to the next. It makes code more readable:
+
+```{r pipe-example}
+# Without pipe (hard to read)
+head(filter(penguins, species == "Adelie"), 3)
+
+# With pipe (reads left to right)
+penguins %>%
+  filter(species == "Adelie") %>%
+  head(3)
+```
+
+Read `%>%` as "and then". The keyboard shortcut is Ctrl+Shift+M (Windows) or Cmd+Shift+M (Mac).
+
+## filter(): Keep Rows That Match Conditions
+
+`filter()` lets you subset your data based on logical conditions.
+
+### Basic Filtering
+
+```{r filter-basic}
+# Only Adelie penguins
+adelie <- penguins %>%
+  filter(species == "Adelie")
+
+nrow(adelie)  # How many Adelie penguins?
+
+# Only penguins from Biscoe island
+biscoe <- penguins %>%
+  filter(island == "Biscoe")
+
+nrow(biscoe)
+```
+
+### Comparison Operators
+
+```{r comparison}
+# Penguins heavier than 5000g
+heavy_penguins <- penguins %>%
+  filter(body_mass_g > 5000)
+
+nrow(heavy_penguins)
+
+# Penguins with bill length >= 45mm
+long_bills <- penguins %>%
+  filter(bill_length_mm >= 45)
+
+head(long_bills)
+```
+
+**Operators:**
+
+- `==` equal to
+- `!=` not equal to
+- `>` greater than
+- `<` less than
+- `>=` greater than or equal
+- `<=` less than or equal
+
+### Combining Conditions
+
+Use `&` (AND) or `|` (OR) to combine conditions:
+
+```{r combine-conditions}
+# Adelie penguins AND males
+adelie_males <- penguins %>%
+  filter(species == "Adelie" & sex == "male")
+
+nrow(adelie_males)
+
+# Adelie OR Chinstrap
+adelie_or_chinstrap <- penguins %>%
+  filter(species == "Adelie" | species == "Chinstrap")
+
+# Better way for multiple values: use %in%
+adelie_or_chinstrap <- penguins %>%
+  filter(species %in% c("Adelie", "Chinstrap"))
+
+count(adelie_or_chinstrap, species)
+```
+
+### Filtering with Multiple Conditions
+
+```{r multiple-conditions}
+# Large Gentoo penguins from Biscoe island
+large_gentoo_biscoe <- penguins %>%
+  filter(species == "Gentoo",
+         island == "Biscoe",
+         body_mass_g > 5500)
+
+nrow(large_gentoo_biscoe)
+```
+
+### Filtering Out Missing Values
+
+```{r filter-na}
+# Remove rows where sex is missing
+penguins_known_sex <- penguins %>%
+  filter(!is.na(sex))
+
+nrow(penguins)  # Original
+nrow(penguins_known_sex)  # After filtering
+
+# The ! means NOT
+```
+
+## select(): Choose Columns to Keep
+
+`select()` lets you pick which columns to keep (or remove).
+
+### Basic Selection
+
+```{r select-basic}
+# Keep only species and body mass
+penguins %>%
+  select(species, body_mass_g) %>%
+  head()
+
+# Keep species and all measurement columns
+penguins %>%
+  select(species, bill_length_mm, bill_depth_mm,
+         flipper_length_mm, body_mass_g) %>%
+  head()
+```
+
+### Helper Functions
+
+```{r select-helpers}
+# All columns ending with "mm"
+penguins %>%
+  select(species, ends_with("mm")) %>%
+  head()
+
+# All columns containing "length"
+penguins %>%
+  select(contains("length")) %>%
+  head()
+
+# All numeric columns
+penguins %>%
+  select(where(is.numeric)) %>%
+  head()
+```
+
+### Removing Columns
+
+```{r select-remove}
+# Remove the year column
+penguins %>%
+  select(-year) %>%
+  head()
+
+# Remove multiple columns
+penguins %>%
+  select(-island, -year) %>%
+  head()
+```
+
+### Reordering Columns
+
+```{r select-reorder}
+# Put body mass first
+penguins %>%
+  select(body_mass_g, everything()) %>%
+  head()
+```
+
+## mutate(): Create New Columns
+
+`mutate()` adds new columns or modifies existing ones.
+
+### Creating New Columns
+
+```{r mutate-basic}
+# Convert body mass from grams to kilograms
+penguins_kg <- penguins %>%
+  mutate(body_mass_kg = body_mass_g / 1000)
+
+penguins_kg %>%
+  select(species, body_mass_g, body_mass_kg) %>%
+  head()
+```
+
+### Multiple New Columns
+
+```{r mutate-multiple}
+# Create several new columns at once
+penguins_metrics <- penguins %>%
+  mutate(
+    body_mass_kg = body_mass_g / 1000,
+    flipper_length_cm = flipper_length_mm / 10,
+    bill_ratio = bill_length_mm / bill_depth_mm
+  )
+
+penguins_metrics %>%
+  select(species, body_mass_kg, flipper_length_cm, bill_ratio) %>%
+  head()
+```
+
+### Conditional Mutations with if_else()
+
+```{r mutate-ifelse}
+# Classify penguins as large or small
+penguins_size <- penguins %>%
+  mutate(size_class = if_else(body_mass_g > 4500,
+                               "large",
+                               "small"))
+
+penguins_size %>%
+  select(species, body_mass_g, size_class) %>%
+  head(10)
+
+# Count by size class
+count(penguins_size, size_class)
+```
+
+### Multiple Conditions with case_when()
+
+```{r mutate-casewhen}
+# More detailed size classification
+penguins_detailed <- penguins %>%
+  mutate(size_category = case_when(
+    body_mass_g < 3500 ~ "small",
+    body_mass_g < 4500 ~ "medium",
+    body_mass_g >= 4500 ~ "large",
+    TRUE ~ "unknown"  # for missing values
+  ))
+
+count(penguins_detailed, size_category)
+```
+
+## arrange(): Sort Rows
+
+`arrange()` sorts data by one or more columns.
+
+### Basic Sorting
+
+```{r arrange-basic}
+# Sort by body mass (smallest to largest)
+penguins %>%
+  arrange(body_mass_g) %>%
+  select(species, body_mass_g) %>%
+  head()
+
+# Sort largest to smallest with desc()
+penguins %>%
+  arrange(desc(body_mass_g)) %>%
+  select(species, island, body_mass_g) %>%
+  head()
+```
+
+### Sorting by Multiple Columns
+
+```{r arrange-multiple}
+# Sort by species, then by body mass within species
+penguins %>%
+  arrange(species, desc(body_mass_g)) %>%
+  select(species, body_mass_g) %>%
+  head(10)
+```
+
+## Combining Operations
+
+The real power comes from chaining operations together!
+
+### Example 1: Filter, Select, Arrange
+
+```{r chain-1}
+# Find the 5 heaviest male Adelie penguins
+penguins %>%
+  filter(species == "Adelie", sex == "male") %>%
+  arrange(desc(body_mass_g)) %>%
+  select(island, bill_length_mm, body_mass_g) %>%
+  head(5)
+```
+
+### Example 2: Filter, Mutate, Arrange
+
+```{r chain-2}
+# Calculate bill ratio for Gentoo penguins and find those with highest ratios
+penguins %>%
+  filter(species == "Gentoo") %>%
+  mutate(bill_ratio = bill_length_mm / bill_depth_mm) %>%
+  arrange(desc(bill_ratio)) %>%
+  select(island, bill_length_mm, bill_depth_mm, bill_ratio) %>%
+  head(5)
+```
+
+### Example 3: Complex Analysis
+
+```{r chain-3}
+# Which island has the largest Chinstrap penguins on average?
+penguins %>%
+  filter(species == "Chinstrap", !is.na(body_mass_g)) %>%
+  select(island, body_mass_g) %>%
+  arrange(island, desc(body_mass_g)) %>%
+  head(10)
+```
+
+## Real-World Biology Example
+
+Imagine you're analyzing data from an infection study:
+
+```{r biology-example}
+# Create example experimental data
+infection_data <- tibble(
+  mouse_id = 1:20,
+  treatment = rep(c("control", "vaccine"), each = 10),
+  bacterial_load = c(
+    # Control group: higher loads
+    8.5e6, 9.2e6, 7.8e6, 8.9e6, 9.5e6, 8.1e6, 9.0e6, 8.4e6, 9.1e6, 8.7e6,
+    # Vaccine group: lower loads
+    2.1e6, 1.8e6, 2.5e6, 1.9e6, 2.2e6, 2.0e6, 2.3e6, 1.7e6, 2.4e6, 2.1e6
+  ),
+  weight_loss_pct = c(
+    12, 15, 13, 14, 16, 11, 15, 13, 14, 15,
+    3, 2, 4, 3, 5, 2, 4, 3, 4, 3
+  )
+)
+
+# Analysis pipeline
+infection_data %>%
+  mutate(
+    log_bacterial_load = log10(bacterial_load),
+    outcome = case_when(
+      weight_loss_pct < 5 ~ "mild",
+      weight_loss_pct < 10 ~ "moderate",
+      weight_loss_pct >= 10 ~ "severe"
+    )
+  ) %>%
+  filter(outcome %in% c("moderate", "severe")) %>%
+  arrange(treatment, desc(bacterial_load)) %>%
+  select(mouse_id, treatment, log_bacterial_load, weight_loss_pct, outcome)
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Find all female penguins heavier than 4000g
+
+
+# Exercise 2: Create a new column that converts flipper length from mm to cm,
+#             then show species and the new column
+
+
+# Exercise 3: Find the 10 penguins with the longest bills, showing only
+#             species, island, and bill length
+
+
+# Exercise 4: For Gentoo penguins, create a column classifying bill depth as
+#             "shallow" (<15mm), "medium" (15-16mm), or "deep" (>16mm)
+
+
+# Exercise 5: Filter to only 2008 data, remove any missing values in body_mass_g,
+#             and calculate the ratio of flipper length to body mass
+
+
+```
+
+## Common Mistakes to Avoid
+
+1. **Forgetting to assign results**
+
+```{r mistakes-1, eval=FALSE}
+# This doesn't save the changes!
+penguins %>%
+  filter(species == "Adelie")
+
+# This does:
+adelie_penguins <- penguins %>%
+  filter(species == "Adelie")
+```
+
+2. **Using = instead of == in filter**
+
+```{r mistakes-2, eval=FALSE}
+# Wrong
+penguins %>% filter(species = "Adelie")  # Error!
+
+# Right
+penguins %>% filter(species == "Adelie")
+```
+
+3. **Quotes around column names**
+
+```{r mistakes-3, eval=FALSE}
+# Wrong
+penguins %>% select("body_mass_g")  # Works but unnecessary
+
+# Right
+penguins %>% select(body_mass_g)
+```
+
+## Key Takeaways
+
+- `filter()` keeps rows based on conditions
+- `select()` keeps columns you want
+- `mutate()` creates or modifies columns
+- `arrange()` sorts your data
+- The pipe `%>%` chains operations together
+- These verbs can be combined to answer complex questions
+- Always check your results with `head()` or `glimpse()`
+
+## Next Steps
+
+In Lesson 4, we'll learn `group_by()` and `summarise()` to calculate statistics for groups - essential for experimental data analysis!
+
+---
+
+**Homework:** Using the penguins dataset, create a pipeline that:
+
+1. Filters to only 2009 data
+2. Removes any rows with missing body mass
+3. Creates a new column for body mass in pounds (1g = 0.0022 lbs)
+4. Arranges by body mass (heaviest first)
+5. Selects only species, island, and your new body mass column
+
+How does this change your interpretation of the data?

@@ -1,0 +1,737 @@
+---
+title: "Lesson 15: Statistical Testing in R"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Perform t-tests and compare groups using tidyverse tools
+2. Conduct ANOVA and post-hoc tests
+3. Use non-parametric tests when appropriate
+4. Correct for multiple testing (FDR, Bonferroni)
+5. Run correlation and simple regression analyses
+6. Use broom to tidy statistical outputs
+7. Apply rstatix for tidyverse-compatible statistics
+8. Visualize statistical results effectively
+
+## Why Tidyverse for Statistics?
+
+Traditional R statistics can be messy and hard to integrate into pipelines. Tidyverse-compatible tools like **broom** and **rstatix** make statistics:
+- More readable
+- Easier to pipe
+- Consistent with dplyr workflows
+- Ready for visualization with ggplot2
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(broom)      # Tidy statistical outputs
+library(rstatix)    # Tidyverse-friendly stats
+library(palmerpenguins)
+
+set.seed(42)
+```
+
+## The broom Package
+
+broom converts statistical outputs into tidy tibbles with three main functions:
+
+- `tidy()`: Component-level statistics (coefficients, p-values)
+- `glance()`: Model-level statistics (R², AIC, overall p-value)
+- `augment()`: Observation-level statistics (fitted values, residuals)
+
+```{r broom-intro}
+# Traditional t-test output
+t_test_result <- t.test(body_mass_g ~ sex,
+                        data = penguins %>% filter(species == "Adelie"))
+
+# Traditional output (messy)
+t_test_result
+
+# Tidy output (clean tibble!)
+tidy(t_test_result)
+
+# One-row summary
+glance(t_test_result)
+```
+
+## T-Tests with rstatix
+
+### Two-Sample T-Test
+
+```{r two-sample-ttest}
+# Compare body mass between sexes for Adelie penguins
+adelie <- penguins %>%
+  filter(species == "Adelie", !is.na(sex), !is.na(body_mass_g))
+
+# Tidyverse approach with rstatix
+adelie %>%
+  t_test(body_mass_g ~ sex) %>%
+  add_significance()  # Adds significance stars
+
+# With effect size (Cohen's d)
+adelie %>%
+  t_test(body_mass_g ~ sex) %>%
+  add_significance() %>%
+  bind_cols(
+    adelie %>% cohens_d(body_mass_g ~ sex)
+  )
+```
+
+### Visualize Results
+
+```{r visualize-ttest}
+# Create comparison plot
+adelie %>%
+  ggplot(aes(x = sex, y = body_mass_g, fill = sex)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.3) +
+  stat_compare_means(method = "t.test", label = "p.format") +
+  labs(title = "Body Mass by Sex in Adelie Penguins",
+       x = "Sex", y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### One-Sample T-Test
+
+```{r one-sample-ttest}
+# Test if mean body mass differs from hypothesized value
+adelie %>%
+  t_test(body_mass_g ~ 1, mu = 4000) %>%
+  add_significance()
+```
+
+### Paired T-Test
+
+```{r paired-ttest}
+# Simulate paired measurements (before/after treatment)
+paired_data <- tibble(
+  mouse_id = rep(paste0("M", 1:10), 2),
+  timepoint = rep(c("before", "after"), each = 10),
+  tumor_volume = c(
+    rnorm(10, 500, 80),                    # before
+    rnorm(10, 500, 80) * runif(10, 0.4, 0.8)  # after (reduced)
+  )
+)
+
+# Paired t-test
+paired_data %>%
+  t_test(tumor_volume ~ timepoint, paired = TRUE) %>%
+  add_significance()
+
+# Visualize
+paired_data %>%
+  ggplot(aes(x = timepoint, y = tumor_volume, group = mouse_id)) +
+  geom_line(color = "gray70") +
+  geom_point(aes(color = timepoint), size = 3) +
+  stat_summary(fun = mean, geom = "point", size = 5, shape = 18,
+               aes(group = 1), color = "red") +
+  stat_summary(fun = mean, geom = "line", aes(group = 1),
+               color = "red", size = 1.5) +
+  labs(title = "Tumor Volume Before and After Treatment",
+       x = "Timepoint", y = "Tumor Volume (mm³)") +
+  theme_minimal()
+```
+
+## ANOVA: Comparing Multiple Groups
+
+### One-Way ANOVA
+
+```{r one-way-anova}
+# Compare body mass across three species
+penguins_clean <- penguins %>%
+  filter(!is.na(body_mass_g))
+
+# ANOVA with rstatix
+penguins_clean %>%
+  anova_test(body_mass_g ~ species)
+
+# Traditional approach with broom
+anova_result <- aov(body_mass_g ~ species, data = penguins_clean)
+tidy(anova_result)
+glance(anova_result)
+```
+
+### Post-Hoc Tests
+
+```{r post-hoc}
+# Tukey HSD for pairwise comparisons
+penguins_clean %>%
+  tukey_hsd(body_mass_g ~ species)
+
+# Visualize with significance brackets
+ggplot(penguins_clean, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot(alpha = 0.7) +
+  stat_compare_means(method = "anova", label.y = 6500) +  # Overall ANOVA p-value
+  stat_compare_means(comparisons = list(c("Adelie", "Chinstrap"),
+                                         c("Chinstrap", "Gentoo"),
+                                         c("Adelie", "Gentoo")),
+                     method = "t.test") +  # Pairwise comparisons
+  labs(title = "Body Mass Across Penguin Species",
+       x = "Species", y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Two-Way ANOVA
+
+```{r two-way-anova}
+# Effect of species AND sex on body mass
+penguins_complete <- penguins %>%
+  filter(!is.na(body_mass_g), !is.na(sex))
+
+# Two-way ANOVA
+penguins_complete %>%
+  anova_test(body_mass_g ~ species * sex)
+
+# Visualize interaction
+penguins_complete %>%
+  group_by(species, sex) %>%
+  summarise(
+    mean = mean(body_mass_g),
+    se = sd(body_mass_g) / sqrt(n())
+  ) %>%
+  ggplot(aes(x = species, y = mean, color = sex, group = sex)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) +
+  labs(title = "Species × Sex Interaction on Body Mass",
+       x = "Species", y = "Mean Body Mass (g) ± SE",
+       color = "Sex") +
+  theme_minimal()
+```
+
+## Non-Parametric Tests
+
+When data aren't normally distributed or have outliers:
+
+### Mann-Whitney U Test (Wilcoxon Rank-Sum)
+
+```{r mann-whitney}
+# Non-parametric alternative to t-test
+adelie %>%
+  wilcox_test(body_mass_g ~ sex)
+
+# Compare to parametric version
+adelie %>%
+  t_test(body_mass_g ~ sex) %>%
+  select(statistic, p) %>%
+  mutate(test = "t-test") %>%
+  bind_rows(
+    adelie %>%
+      wilcox_test(body_mass_g ~ sex) %>%
+      select(statistic, p) %>%
+      mutate(test = "Wilcoxon")
+  )
+```
+
+### Kruskal-Wallis Test
+
+```{r kruskal-wallis}
+# Non-parametric alternative to ANOVA
+penguins_clean %>%
+  kruskal_test(body_mass_g ~ species)
+
+# Post-hoc with Dunn's test
+penguins_clean %>%
+  dunn_test(body_mass_g ~ species, p.adjust.method = "bonferroni")
+```
+
+### Wilcoxon Signed-Rank Test
+
+```{r wilcoxon-signed}
+# Non-parametric alternative to paired t-test
+paired_data %>%
+  wilcox_test(tumor_volume ~ timepoint, paired = TRUE)
+```
+
+## Multiple Testing Correction
+
+Critical when testing many hypotheses!
+
+### Testing Multiple Genes
+
+```{r multiple-testing}
+# Simulate gene expression data
+gene_expression <- tibble(
+  gene = paste0("Gene_", 1:100),
+  control_mean = rnorm(100, 100, 30),
+  treated_mean = control_mean + c(
+    rnorm(10, 50, 15),   # 10 truly different genes
+    rnorm(90, 0, 15)     # 90 not different
+  )
+) %>%
+  rowwise() %>%
+  mutate(
+    control_values = list(rnorm(5, control_mean, 15)),
+    treated_values = list(rnorm(5, treated_mean, 15))
+  ) %>%
+  ungroup()
+
+# Run t-test for each gene
+test_results <- gene_expression %>%
+  mutate(
+    test = map2(control_values, treated_values, ~{
+      t.test(.x, .y) %>% tidy()
+    })
+  ) %>%
+  unnest(test) %>%
+  select(gene, estimate, statistic, p.value)
+
+# Add multiple testing correction
+test_results <- test_results %>%
+  mutate(
+    p.adj.bonferroni = p.adjust(p.value, method = "bonferroni"),
+    p.adj.fdr = p.adjust(p.value, method = "fdr"),  # Benjamini-Hochberg
+    sig.unadjusted = p.value < 0.05,
+    sig.bonferroni = p.adj.bonferroni < 0.05,
+    sig.fdr = p.adj.fdr < 0.05
+  )
+
+# Compare methods
+test_results %>%
+  summarise(
+    n_unadjusted = sum(sig.unadjusted),
+    n_bonferroni = sum(sig.bonferroni),
+    n_fdr = sum(sig.fdr)
+  )
+```
+
+### Visualize Multiple Testing
+
+```{r visualize-multiple-testing}
+# Volcano plot with FDR threshold
+test_results %>%
+  ggplot(aes(x = estimate, y = -log10(p.value), color = sig.fdr)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "red") +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "gray70"),
+                     labels = c("Not significant", "FDR < 0.05")) +
+  labs(title = "Multiple Testing: Gene Expression Changes",
+       subtitle = "Red line: nominal p = 0.05; Red points: FDR < 0.05",
+       x = "Mean Difference (Treated - Control)",
+       y = "-log10(p-value)",
+       color = "Significance") +
+  theme_minimal()
+```
+
+### Group-wise Testing with Multiple Correction
+
+```{r group-testing}
+# Test each gene within each tissue type
+multi_tissue_data <- crossing(
+  tissue = c("liver", "kidney", "heart"),
+  gene = paste0("Gene_", 1:50)
+) %>%
+  mutate(
+    control = map(1:n(), ~rnorm(5, 100, 20)),
+    treated = map(1:n(), ~rnorm(5, 100 + rnorm(1, 0, 20), 20))
+  )
+
+# Run tests
+tissue_results <- multi_tissue_data %>%
+  mutate(
+    test = map2(control, treated, ~{
+      t.test(.x, .y) %>% tidy()
+    })
+  ) %>%
+  unnest(test) %>%
+  select(tissue, gene, p.value) %>%
+  # Adjust within each tissue
+  group_by(tissue) %>%
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>%
+  ungroup()
+
+# Summary by tissue
+tissue_results %>%
+  group_by(tissue) %>%
+  summarise(
+    n_sig_unadjusted = sum(p.value < 0.05),
+    n_sig_fdr = sum(p.adj < 0.05)
+  )
+```
+
+## Correlation Analysis
+
+### Pearson Correlation
+
+```{r correlation}
+# Correlation between flipper length and body mass
+penguins_clean %>%
+  summarise(
+    correlation = cor(flipper_length_mm, body_mass_g,
+                     use = "complete.obs"),
+    cor_test = list(cor.test(flipper_length_mm, body_mass_g) %>% tidy())
+  ) %>%
+  unnest(cor_test)
+
+# Tidyverse approach with rstatix
+penguins_clean %>%
+  cor_test(flipper_length_mm, body_mass_g)
+```
+
+### Correlation by Group
+
+```{r correlation-grouped}
+# Correlation within each species
+penguins_clean %>%
+  group_by(species) %>%
+  cor_test(flipper_length_mm, body_mass_g)
+
+# Visualize
+penguins_clean %>%
+  ggplot(aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  facet_wrap(~species) +
+  stat_cor(method = "pearson", label.x.npc = 0.5, label.y.npc = 0.1) +
+  labs(title = "Correlation: Flipper Length vs Body Mass",
+       x = "Flipper Length (mm)", y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Correlation Matrix
+
+```{r correlation-matrix}
+# Multiple correlations
+penguin_correlations <- penguins_clean %>%
+  select(bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g) %>%
+  cor_mat()
+
+penguin_correlations
+
+# Visualize as heatmap
+penguin_correlations %>%
+  cor_reorder() %>%
+  pull_lower_triangle() %>%
+  cor_plot(label = TRUE)
+```
+
+### Spearman Correlation (Non-Parametric)
+
+```{r spearman}
+# When data aren't normally distributed
+penguins_clean %>%
+  cor_test(flipper_length_mm, body_mass_g, method = "spearman")
+```
+
+## Chi-Square Tests
+
+For categorical data:
+
+```{r chi-square}
+# Test association between species and island
+penguins %>%
+  count(species, island) %>%
+  pivot_wider(names_from = island, values_from = n, values_fill = 0)
+
+# Chi-square test
+penguins %>%
+  chisq_test(species ~ island)
+
+# Visualize
+penguins %>%
+  count(species, island) %>%
+  ggplot(aes(x = species, y = n, fill = island)) +
+  geom_col(position = "fill") +
+  labs(title = "Distribution of Species Across Islands",
+       x = "Species", y = "Proportion",
+       fill = "Island") +
+  theme_minimal()
+```
+
+## Effect Sizes
+
+P-values tell you IF there's an effect, effect sizes tell you HOW LARGE:
+
+```{r effect-sizes}
+# Cohen's d for t-tests
+adelie %>%
+  cohens_d(body_mass_g ~ sex)
+
+# Multiple effect sizes
+adelie %>%
+  bind_rows(
+    cohens_d(., body_mass_g ~ sex) %>% mutate(metric = "Cohen's d"),
+    # Hedge's g (small sample correction)
+    hedges_g(., body_mass_g ~ sex) %>% mutate(metric = "Hedge's g")
+  )
+
+# Effect size for ANOVA (eta squared)
+penguins_clean %>%
+  anova_test(body_mass_g ~ species) %>%
+  as_tibble()
+```
+
+## Assumptions Checking
+
+### Normality
+
+```{r normality}
+# Shapiro-Wilk test
+adelie %>%
+  shapiro_test(body_mass_g)
+
+# By group
+penguins_clean %>%
+  group_by(species) %>%
+  shapiro_test(body_mass_g)
+
+# Q-Q plot
+ggplot(adelie, aes(sample = body_mass_g)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot: Adelie Body Mass") +
+  theme_minimal()
+```
+
+### Homogeneity of Variance
+
+```{r variance-test}
+# Levene's test
+penguins_clean %>%
+  levene_test(body_mass_g ~ species)
+
+# Visualize variance
+penguins_clean %>%
+  group_by(species) %>%
+  summarise(
+    mean = mean(body_mass_g),
+    sd = sd(body_mass_g)
+  ) %>%
+  ggplot(aes(x = species, y = sd, fill = species)) +
+  geom_col() +
+  labs(title = "Standard Deviation by Species",
+       x = "Species", y = "SD of Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Power Analysis
+
+Calculate required sample size or power:
+
+```{r power-analysis}
+# Using pwr package
+library(pwr)
+
+# Power for t-test
+# What sample size needed to detect effect size of 0.5 with 80% power?
+pwr.t.test(d = 0.5,           # Effect size (Cohen's d)
+           sig.level = 0.05,  # Alpha
+           power = 0.80,      # Desired power
+           type = "two.sample")
+
+# What power do we have with n=30 per group?
+pwr.t.test(n = 30,
+           d = 0.5,
+           sig.level = 0.05,
+           type = "two.sample")
+
+# Visualize power curves
+power_data <- tibble(
+  n = 5:100,
+  power = map_dbl(n, ~{
+    pwr.t.test(n = .x, d = 0.5, sig.level = 0.05,
+               type = "two.sample")$power
+  })
+)
+
+ggplot(power_data, aes(x = n, y = power)) +
+  geom_line(size = 1.5, color = "steelblue") +
+  geom_hline(yintercept = 0.80, linetype = "dashed", color = "red") +
+  labs(title = "Statistical Power vs Sample Size",
+       subtitle = "Effect size = 0.5, α = 0.05",
+       x = "Sample Size per Group",
+       y = "Power (1 - β)") +
+  theme_minimal()
+```
+
+## Complete Analysis Pipeline
+
+Combining everything:
+
+```{r complete-pipeline}
+# Research question: Does treatment affect tumor growth across cell lines?
+experiment <- tibble(
+  cell_line = rep(c("LineA", "LineB", "LineC"), each = 20),
+  treatment = rep(rep(c("Control", "Drug"), each = 10), 3),
+  tumor_volume = c(
+    # LineA: drug effective
+    rnorm(10, 500, 50), rnorm(10, 200, 40),
+    # LineB: drug moderately effective
+    rnorm(10, 500, 50), rnorm(10, 350, 50),
+    # LineC: drug not effective
+    rnorm(10, 500, 50), rnorm(10, 480, 50)
+  )
+)
+
+# Complete statistical analysis
+analysis_results <- experiment %>%
+  # Test within each cell line
+  group_by(cell_line) %>%
+  t_test(tumor_volume ~ treatment) %>%
+  adjust_pvalue(method = "fdr") %>%
+  add_significance("p.adj") %>%
+  # Add effect size
+  bind_cols(
+    experiment %>%
+      group_by(cell_line) %>%
+      cohens_d(tumor_volume ~ treatment) %>%
+      select(effsize, magnitude)
+  ) %>%
+  # Clean up
+  select(cell_line, statistic, p, p.adj, p.adj.signif, effsize, magnitude)
+
+analysis_results
+
+# Visualize
+experiment %>%
+  ggplot(aes(x = treatment, y = tumor_volume, fill = treatment)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.3) +
+  facet_wrap(~cell_line) +
+  stat_compare_means(method = "t.test", label = "p.format") +
+  labs(title = "Drug Effect Across Cell Lines",
+       x = "Treatment", y = "Tumor Volume (mm³)") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## Reporting Statistics
+
+### Create Publication-Ready Table
+
+```{r stats-table}
+# Summary statistics and test results
+summary_table <- experiment %>%
+  group_by(cell_line, treatment) %>%
+  summarise(
+    n = n(),
+    mean = mean(tumor_volume),
+    sd = sd(tumor_volume),
+    sem = sd / sqrt(n)
+  ) %>%
+  pivot_wider(names_from = treatment,
+              values_from = c(n, mean, sd, sem)) %>%
+  # Add test results
+  left_join(
+    analysis_results %>% select(cell_line, p.adj, p.adj.signif, effsize),
+    by = "cell_line"
+  )
+
+summary_table %>%
+  knitr::kable(digits = 2, caption = "Effect of Drug Treatment on Tumor Volume")
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Test if male and female Chinstrap penguins differ in bill length
+# Include effect size and appropriate visualization
+
+
+# Exercise 2: Compare flipper length across all three islands
+# Use ANOVA with post-hoc tests and check assumptions
+
+
+# Exercise 3: Test 20 genes for differential expression between two conditions
+# Apply FDR correction and create a volcano plot
+
+
+# Exercise 4: Calculate the correlation between bill length and bill depth
+# for each species separately. Are they all significant?
+
+
+# Exercise 5: Determine the sample size needed to detect a Cohen's d of 0.3
+# with 90% power for a two-sample t-test
+
+
+```
+
+## Statistical Decision Tree
+
+```{r decision-tree, echo=FALSE}
+tibble(
+  Question = c(
+    "Comparing 2 groups?",
+    "  - Normally distributed?",
+    "    - Independent samples?",
+    "    - Paired samples?",
+    "  - Not normal?",
+    "Comparing 3+ groups?",
+    "  - Normally distributed?",
+    "  - Not normal?",
+    "Categorical data?",
+    "Relationship between variables?",
+    "  - Both continuous?",
+    "  - Both categorical?"
+  ),
+  Test = c(
+    "",
+    "",
+    "t-test (t_test)",
+    "Paired t-test (t_test with paired=TRUE)",
+    "Wilcoxon test (wilcox_test)",
+    "",
+    "ANOVA (anova_test) + Tukey HSD",
+    "Kruskal-Wallis (kruskal_test) + Dunn",
+    "Chi-square (chisq_test)",
+    "",
+    "Correlation (cor_test)",
+    "Chi-square (chisq_test)"
+  )
+) %>%
+  knitr::kable()
+```
+
+## Key Takeaways
+
+- Use **rstatix** for tidyverse-compatible statistical tests
+- Use **broom** to convert statistical outputs to tibbles
+- Always adjust for multiple testing when testing many hypotheses
+- Report effect sizes, not just p-values
+- Check assumptions before choosing parametric vs non-parametric tests
+- Visualize your results alongside statistics
+- Consider statistical power when planning experiments
+- Combine dplyr, purrr, and statistical functions for powerful workflows
+
+## Common Mistakes to Avoid
+
+1. **Multiple testing without correction** → Inflated Type I error
+2. **P-hacking** → Testing many things until something is significant
+3. **Ignoring assumptions** → Using parametric tests on non-normal data
+4. **Not reporting effect sizes** → Statistically significant ≠ practically important
+5. **Wrong test for paired data** → Treating paired samples as independent
+6. **Forgetting about sample size** → Underpowered studies
+
+## Next Steps
+
+Now that you have statistical testing skills, you can:
+- Test hypotheses in your own data
+- Perform quality control on experiments
+- Identify significant differences and associations
+- Report results appropriately for publication
+
+---
+
+**Homework:**
+
+1. Take the penguins dataset and formulate 3 biological questions
+2. Choose appropriate statistical tests for each
+3. Check assumptions
+4. Perform tests with multiple testing correction if needed
+5. Calculate effect sizes
+6. Create visualizations with significance annotations
+7. Write a brief interpretation of results

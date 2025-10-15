@@ -1,0 +1,284 @@
+---
+title: "Lesson 2: Data Import and Exploration"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Load the tidyverse package
+2. Import data from CSV files
+3. Understand tibbles (tidyverse data frames)
+4. Explore data structure with `glimpse()`, `head()`, and `summary()`
+5. Access columns using the `$` operator
+6. Create simple visualizations to understand your data
+
+## The Tidyverse
+
+The tidyverse is a collection of R packages designed for data science. It makes data analysis more intuitive and readable.
+
+```{r load-tidyverse}
+# Install if needed (run once): install.packages("tidyverse")
+library(tidyverse)
+```
+
+## The Palmer Penguins Dataset
+
+We'll use the Palmer Penguins dataset - real data collected from penguin colonies in Antarctica. It's perfect for learning because it's:
+
+- Biological data (morphological measurements)
+- Clean but has some missing values (realistic!)
+- Multiple variables to explore
+
+```{r load-penguins}
+# Install if needed (run once): install.packages("palmerpenguins")
+library(palmerpenguins)
+
+# Load the data
+penguins <- penguins
+
+# View the first few rows
+head(penguins)
+```
+
+## First Look at Your Data
+
+### Using glimpse()
+
+`glimpse()` gives you a compact overview:
+
+```{r glimpse}
+glimpse(penguins)
+```
+
+This tells us:
+
+- We have 344 observations (penguins)
+- 8 variables (measurements/characteristics)
+- The data types of each variable
+- A preview of the first few values
+
+### Column Names and Dimensions
+
+```{r structure}
+# Column names
+names(penguins)
+
+# Number of rows and columns
+nrow(penguins)
+ncol(penguins)
+
+# Or both at once
+dim(penguins)
+```
+
+## Understanding the Variables
+
+Let's see what we're working with:
+
+- `species`: Penguin species (Adelie, Chinstrap, Gentoo)
+- `island`: Island where observed
+- `bill_length_mm`: Bill length in millimeters
+- `bill_depth_mm`: Bill depth in millimeters
+- `flipper_length_mm`: Flipper length in millimeters
+- `body_mass_g`: Body mass in grams
+- `sex`: Penguin sex (male/female)
+- `year`: Year of observation
+
+## Summary Statistics
+
+The `summary()` function provides statistical summaries:
+
+```{r summary}
+summary(penguins)
+```
+
+Notice:
+
+- Minimum, maximum, quartiles, and mean for numeric variables
+- Counts for categorical variables
+- `NA's` indicating missing values
+
+## Accessing Columns
+
+Use the `$` operator to access a specific column:
+
+```{r access-columns}
+# Get body mass column
+penguins$body_mass_g
+
+# Calculate mean body mass (removing NAs)
+mean(penguins$body_mass_g, na.rm = TRUE)
+
+# Standard deviation
+sd(penguins$body_mass_g, na.rm = TRUE)
+```
+
+**Note:** `na.rm = TRUE` tells R to remove missing values before calculating.
+
+## Exploring Categorical Variables
+
+For categorical data, use `table()` or `count()`:
+
+```{r categorical}
+# How many penguins per species?
+table(penguins$species)
+
+# Tidyverse way (we'll use this more!)
+count(penguins, species)
+
+# Cross-tabulation: species by island
+table(penguins$species, penguins$island)
+```
+
+## Quick Visualizations
+
+Visualizations help us understand data patterns quickly.
+
+### Distribution of Body Mass
+
+```{r histogram}
+ggplot(penguins, aes(x = body_mass_g)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Penguin Body Mass",
+       x = "Body Mass (g)",
+       y = "Count") +
+  theme_minimal()
+```
+
+### Body Mass by Species
+
+```{r boxplot}
+ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Body Mass by Penguin Species",
+       x = "Species",
+       y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Relationship Between Variables
+
+```{r scatterplot}
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point(alpha = 0.7, size = 2) +
+  labs(title = "Flipper Length vs Body Mass",
+       x = "Flipper Length (mm)",
+       y = "Body Mass (g)",
+       color = "Species") +
+  theme_minimal()
+```
+
+## Importing Your Own Data
+
+In real research, you'll import data from CSV files:
+
+```{r import-csv, eval=FALSE}
+# Basic import
+my_data <- read_csv("path/to/your/file.csv")
+
+# View it
+glimpse(my_data)
+head(my_data)
+```
+
+### Tips for CSV Files
+
+1. First row should contain column names
+2. Use consistent naming (no spaces in column names!)
+3. Keep data rectangular (same number of columns in each row)
+4. Save from Excel as CSV (not .xlsx)
+
+### Example: Creating and Importing a CSV
+
+```{r create-example-data}
+# Create example data
+experiment_data <- tibble(
+  sample_id = 1:5,
+  treatment = c("control", "control", "drug_A", "drug_A", "drug_B"),
+  cell_viability = c(98.2, 97.8, 85.3, 87.1, 45.2),
+  protein_conc = c(1.2, 1.3, 1.1, 1.0, 0.8)
+)
+
+# Save it
+write_csv(experiment_data, "example_experiment.csv")
+
+# Import it back
+imported_data <- read_csv("example_experiment.csv")
+
+glimpse(imported_data)
+```
+
+## Dealing with Missing Data
+
+Missing data is common in biological datasets:
+
+```{r missing-data}
+# Count missing values in each column
+colSums(is.na(penguins))
+
+# Remove rows with any missing values
+penguins_complete <- na.omit(penguins)
+nrow(penguins_complete)
+
+# We went from 344 to 333 penguins
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: What is the mean flipper length for all penguins?
+
+
+# Exercise 2: What is the range (min to max) of bill length?
+
+
+# Exercise 3: How many male vs female penguins are in the dataset?
+
+
+# Exercise 4: Create a histogram of flipper length
+
+
+# Exercise 5: What island has the most observations?
+
+
+```
+
+## Data Exploration Checklist
+
+When you get a new dataset, always:
+
+1. ✓ Load required packages
+2. ✓ Import data and assign to a variable
+3. ✓ Use `glimpse()` to see structure
+4. ✓ Check dimensions with `dim()`
+5. ✓ Look at first few rows with `head()`
+6. ✓ Get summary statistics with `summary()`
+7. ✓ Check for missing values
+8. ✓ Create initial visualizations
+9. ✓ Understand what each variable represents
+
+## Key Takeaways
+
+- The tidyverse makes data analysis more intuitive
+- Always explore your data before analysis
+- `glimpse()`, `summary()`, and visualizations are your friends
+- Missing values are normal - learn to handle them
+- CSV files are the standard for sharing data
+- Good data exploration prevents analytical mistakes
+
+## Next Steps
+
+In Lesson 3, we'll learn to transform and filter data using dplyr - the tidyverse's most powerful data manipulation tool!
+
+---
+
+**Homework:** Import the penguins dataset and create your own visualization exploring a relationship between variables. Try different plot types!

@@ -1,0 +1,603 @@
+---
+title: "Lesson 12: stringr for Text and Sequence Data"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Manipulate strings with stringr functions
+2. Use regular expressions for pattern matching
+3. Clean and parse gene names and sample IDs
+4. Work with DNA/protein sequences
+5. Extract information from messy text data
+6. Combine stringr with dplyr for powerful text processing
+7. Handle biological annotation strings
+
+## Why stringr for Biology?
+
+Biological data is full of text:
+- Gene names: "ENSG00000141510.16", "TP53_HUMAN"
+- Sample IDs: "Patient_001_Tumor_RNA_Batch2"
+- Sequences: "ATCGATCGATCG"
+- Annotations: "GO:0006915;apoptosis;biological_process"
+- File names: "Sample_S1_L001_R1_001.fastq.gz"
+
+stringr makes working with this text easy!
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)  # includes stringr
+```
+
+## Basic String Operations
+
+### str_length() - Length of Strings
+
+```{r str-length}
+gene_names <- c("TP53", "BRCA1", "EGFR", "KRAS")
+str_length(gene_names)
+
+# DNA sequences
+sequences <- c("ATCG", "ATCGATCG", "ATCGATCGATCG")
+str_length(sequences)
+```
+
+### str_c() - Combine Strings
+
+```{r str-c}
+# Combine strings
+str_c("Sample", "001")
+
+# With separator
+str_c("Sample", "001", sep = "_")
+
+# Multiple elements
+samples <- c("S1", "S2", "S3")
+conditions <- c("Control", "Treated", "Control")
+
+str_c(samples, conditions, sep = "_")
+
+# Collapse into one string
+str_c(gene_names, collapse = ", ")
+```
+
+### str_sub() - Extract Substrings
+
+```{r str-sub}
+# Extract portions of strings
+gene_ids <- c("ENSG00000141510", "ENSG00000139618", "ENSG00000146648")
+
+# First 4 characters
+str_sub(gene_ids, 1, 4)
+
+# Characters 5-14
+str_sub(gene_ids, 5, 14)
+
+# Last 5 characters
+str_sub(gene_ids, -5, -1)
+
+# Useful for barcodes
+barcodes <- c("ATCGATCG-GCTAGCTA", "GCTAGCTA-ATCGATCG")
+# Extract first barcode
+str_sub(barcodes, 1, 8)
+```
+
+### str_to_*() - Change Case
+
+```{r str-case}
+gene_names <- c("tp53", "BrCa1", "EGFR")
+
+str_to_upper(gene_names)
+str_to_lower(gene_names)
+str_to_title(gene_names)
+```
+
+## Pattern Matching and Detection
+
+### str_detect() - Does Pattern Exist?
+
+```{r str-detect}
+genes <- c("TP53", "BRCA1", "BRCA2", "EGFR", "KRAS")
+
+# Which genes contain "BRCA"?
+str_detect(genes, "BRCA")
+
+# Use with filter
+gene_data <- tibble(gene = genes, expression = c(120, 450, 380, 290, 150))
+
+gene_data %>%
+  filter(str_detect(gene, "BRCA"))
+```
+
+### str_subset() - Extract Matching Strings
+
+```{r str-subset}
+# Only return matches
+str_subset(genes, "BRCA")
+
+# Genes starting with "BR"
+str_subset(genes, "^BR")
+
+# Genes ending with "3"
+str_subset(genes, "3$")
+```
+
+### str_count() - Count Pattern Occurrences
+
+```{r str-count}
+# DNA sequences
+dna <- c("ATCGATCG", "GGGGAAAA", "ATATATCG")
+
+# Count G nucleotides
+str_count(dna, "G")
+
+# Count CG dinucleotides
+str_count(dna, "CG")
+
+# Count AT repeats
+str_count(dna, "AT")
+```
+
+## Regular Expressions (Regex)
+
+Powerful pattern matching!
+
+### Basic Regex Patterns
+
+```{r regex-basics}
+sample_ids <- c("Sample_001_Control", "Sample_002_Treated",
+                "Sample_003_Control", "Patient_001_Tumor")
+
+# Any digit: \\d
+str_extract(sample_ids, "\\d+")  # One or more digits
+
+# Any letter: \\w
+str_extract(sample_ids, "\\w+")  # One or more word characters
+
+# Specific pattern
+str_detect(sample_ids, "Patient")  # Contains "Patient"
+str_detect(sample_ids, "^Sample")  # Starts with "Sample"
+str_detect(sample_ids, "Control$") # Ends with "Control"
+```
+
+### Common Regex Symbols
+
+```
+^       Start of string
+$       End of string
+.       Any character
+*       0 or more times
++       1 or more times
+?       0 or 1 time
+\\d     Any digit (0-9)
+\\w     Any word character (letters, numbers, _)
+\\s     Any whitespace
+[ABC]   Any of A, B, or C
+[A-Z]   Any uppercase letter
+[0-9]   Any digit
+```
+
+### str_extract() - Extract Matching Pattern
+
+```{r str-extract}
+# Extract sample numbers
+sample_ids <- c("Sample_001_Control", "Sample_142_Treated", "Sample_023_Control")
+
+str_extract(sample_ids, "\\d+")
+
+# Extract condition
+str_extract(sample_ids, "(Control|Treated)")
+
+# Extract all matches with str_extract_all
+text <- "Genes: TP53, BRCA1, EGFR, and KRAS"
+str_extract_all(text, "[A-Z0-9]+")
+```
+
+### str_match() - Extract with Groups
+
+```{r str-match}
+# Complex sample IDs
+ids <- c("Patient_P001_Tumor_RNA", "Patient_P002_Normal_DNA", "Patient_P003_Tumor_RNA")
+
+# Extract multiple parts
+str_match(ids, "Patient_(P\\d+)_(\\w+)_(\\w+)")
+
+# Create tibble from matches
+matches <- str_match(ids, "Patient_(P\\d+)_(\\w+)_(\\w+)")
+colnames(matches) <- c("full", "patient_id", "tissue", "molecule")
+as_tibble(matches)
+```
+
+## str_replace() and str_remove()
+
+### Replacing Patterns
+
+```{r str-replace}
+# Clean gene names
+messy_genes <- c("gene_TP53_v1", "gene_BRCA1_v2", "gene_EGFR_v1")
+
+# Remove "gene_" prefix
+str_remove(messy_genes, "gene_")
+
+# Remove version suffix
+str_remove(messy_genes, "_v\\d+")
+
+# Chain removals
+messy_genes %>%
+  str_remove("gene_") %>%
+  str_remove("_v\\d+")
+
+# Replace patterns
+str_replace(messy_genes, "gene", "Gene")
+
+# Replace all occurrences
+text <- "ATCGATCGATCG"
+str_replace_all(text, "AT", "NN")
+```
+
+## Practical Biology Examples
+
+### Parsing Gene IDs
+
+```{r parse-gene-ids}
+# Ensembl gene IDs
+ensembl_ids <- c(
+  "ENSG00000141510.16",
+  "ENSG00000139618.14",
+  "ENSG00000146648.18"
+)
+
+# Split into ID and version
+gene_info <- tibble(full_id = ensembl_ids) %>%
+  mutate(
+    base_id = str_remove(full_id, "\\.\\d+$"),
+    version = str_extract(full_id, "\\d+$")
+  )
+
+gene_info
+```
+
+### Cleaning Sample Metadata from IDs
+
+```{r parse-samples}
+# Messy sample IDs
+sample_names <- c(
+  "Patient_001_Tumor_RNA_Batch1_Rep1",
+  "Patient_002_Normal_DNA_Batch1_Rep2",
+  "Patient_003_Tumor_RNA_Batch2_Rep1"
+)
+
+# Extract metadata
+sample_metadata <- tibble(sample_id = sample_names) %>%
+  mutate(
+    patient = str_extract(sample_id, "Patient_\\d+"),
+    patient_num = str_extract(patient, "\\d+"),
+    tissue = str_extract(sample_id, "(Tumor|Normal)"),
+    molecule = str_extract(sample_id, "(RNA|DNA)"),
+    batch = str_extract(sample_id, "Batch\\d+"),
+    replicate = str_extract(sample_id, "Rep\\d+")
+  )
+
+sample_metadata
+```
+
+### Working with DNA Sequences
+
+```{r dna-sequences}
+# DNA sequences
+sequences <- tibble(
+  seq_id = c("Seq1", "Seq2", "Seq3"),
+  sequence = c(
+    "ATCGATCGATCG",
+    "GGCTAGCTAGCT",
+    "TTAATTAATTAA"
+  )
+)
+
+sequences %>%
+  mutate(
+    length = str_length(sequence),
+    gc_count = str_count(sequence, "[GC]"),
+    gc_content = gc_count / length * 100,
+    has_start_codon = str_detect(sequence, "ATG"),
+    has_stop_codon = str_detect(sequence, "TAA|TAG|TGA")
+  )
+```
+
+### Reverse Complement
+
+```{r reverse-complement}
+# Create reverse complement function
+reverse_complement <- function(seq) {
+  seq %>%
+    str_to_upper() %>%
+    # Complement
+    str_replace_all("A", "t") %>%
+    str_replace_all("T", "a") %>%
+    str_replace_all("G", "c") %>%
+    str_replace_all("C", "g") %>%
+    str_to_upper() %>%
+    # Reverse
+    str_split("") %>%
+    map_chr(~str_c(rev(.x), collapse = ""))
+}
+
+dna_seq <- "ATCGATCG"
+reverse_complement(dna_seq)
+```
+
+### Parsing GO Terms
+
+```{r go-terms}
+# Gene Ontology annotations
+go_annotations <- c(
+  "GO:0006915;apoptosis;biological_process",
+  "GO:0005634;nucleus;cellular_component",
+  "GO:0003700;DNA binding;molecular_function"
+)
+
+go_data <- tibble(annotation = go_annotations) %>%
+  separate(annotation, into = c("go_id", "term", "category"), sep = ";")
+
+go_data
+```
+
+### Extracting Info from FASTA Headers
+
+```{r fasta-headers}
+# FASTA format headers
+fasta_headers <- c(
+  ">sp|P04637|P53_HUMAN Cellular tumor antigen p53 OS=Homo sapiens GN=TP53",
+  ">sp|P38398|BRCA1_HUMAN Breast cancer type 1 susceptibility protein OS=Homo sapiens GN=BRCA1",
+  ">sp|P00533|EGFR_HUMAN Epidermal growth factor receptor OS=Homo sapiens GN=EGFR"
+)
+
+fasta_info <- tibble(header = fasta_headers) %>%
+  mutate(
+    accession = str_extract(header, "(?<=\\|)[A-Z0-9]+(?=\\|)"),
+    gene_symbol = str_extract(header, "GN=\\w+") %>% str_remove("GN="),
+    protein_name = str_extract(header, "(?<=\\|).*?(?= OS=)"),
+    organism = str_extract(header, "OS=[^G]+") %>% str_remove("OS=") %>% str_trim()
+  )
+
+fasta_info
+```
+
+## str_split() - Split Strings
+
+```{r str-split}
+# Split on delimiter
+genes_string <- "TP53,BRCA1,EGFR,KRAS"
+str_split(genes_string, ",")
+
+# Split returns a list
+str_split(genes_string, ",")[[1]]
+
+# Split multiple strings
+pathways <- c("gene1;gene2;gene3", "geneA;geneB", "geneX")
+str_split(pathways, ";")
+
+# Split into data frame
+tibble(pathway = pathways) %>%
+  mutate(genes = str_split(pathway, ";")) %>%
+  unnest(genes)
+```
+
+## str_trim() and str_squish()
+
+```{r str-trim}
+# Remove whitespace
+messy_names <- c("  TP53  ", " BRCA1", "EGFR   ")
+
+str_trim(messy_names)
+
+# Remove extra internal whitespace too
+messy_text <- c("Gene  Name:   TP53    ", "  BRCA1  is   important  ")
+
+str_squish(messy_text)
+```
+
+## str_pad() - Add Padding
+
+```{r str-pad}
+# Make sample IDs consistent width
+sample_nums <- c("1", "23", "456")
+
+# Pad with zeros
+str_pad(sample_nums, width = 4, pad = "0")
+
+# Create sample IDs
+str_c("Sample_", str_pad(sample_nums, width = 3, pad = "0"))
+```
+
+## str_wrap() - Format Long Text
+
+```{r str-wrap}
+# Wrap long sequence for display
+long_seq <- str_c(rep("ATCG", 20), collapse = "")
+
+cat(str_wrap(long_seq, width = 40))
+```
+
+## Combining stringr with dplyr
+
+Real-world data cleaning:
+
+```{r stringr-dplyr}
+# Messy qPCR data
+qpcr_data <- tibble(
+  sample = c("Patient001_TP53_Rep1", "Patient001_TP53_Rep2",
+             "Patient002_BRCA1_Rep1", "Patient002_BRCA1_Rep2"),
+  ct_value = c("18.5", "18.7", "22.3", "22.1"),
+  quality = c("PASS", "PASS", "WARNING: High SD", "PASS")
+)
+
+qpcr_cleaned <- qpcr_data %>%
+  mutate(
+    # Extract components
+    patient_id = str_extract(sample, "Patient\\d+"),
+    gene = str_extract(sample, "(?<=_)[A-Z0-9]+(?=_Rep)"),
+    replicate = str_extract(sample, "Rep\\d+"),
+
+    # Clean Ct values
+    ct_numeric = as.numeric(ct_value),
+
+    # Simplify quality
+    qc_status = str_extract(quality, "^\\w+"),
+    has_warning = str_detect(quality, "WARNING")
+  ) %>%
+  select(-sample, -ct_value, -quality)
+
+qpcr_cleaned
+```
+
+## Pattern Detection in Sequences
+
+```{r sequence-patterns}
+# Find restriction sites
+enzymes <- tibble(
+  enzyme = c("EcoRI", "BamHI", "HindIII"),
+  recognition_site = c("GAATTC", "GGATCC", "AAGCTT")
+)
+
+test_sequence <- "ATCGGAATTCGATGGATCCGGGAAGCTTCGAT"
+
+enzymes %>%
+  mutate(
+    found = map_lgl(recognition_site, ~str_detect(test_sequence, .x)),
+    position = map(recognition_site, ~str_locate_all(test_sequence, .x)),
+    count = str_count(test_sequence, recognition_site)
+  )
+```
+
+## Working with File Names
+
+```{r file-names}
+# FASTQ file names
+files <- c(
+  "Sample_S1_L001_R1_001.fastq.gz",
+  "Sample_S1_L001_R2_001.fastq.gz",
+  "Sample_S2_L001_R1_001.fastq.gz"
+)
+
+file_info <- tibble(filename = files) %>%
+  mutate(
+    sample = str_extract(filename, "S\\d+"),
+    lane = str_extract(filename, "L\\d+"),
+    read = str_extract(filename, "R[12]"),
+    is_paired_end = str_detect(filename, "R[12]"),
+    is_compressed = str_detect(filename, "\\.gz$")
+  )
+
+file_info
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Extract all email addresses from this text
+text <- "Contact john@example.com or mary@university.edu for info"
+# Hint: pattern is word characters, @, word characters, ., word characters
+
+
+# Exercise 2: Clean these gene names - remove species prefix and version
+genes <- c("hsa-TP53_v1.2", "hsa-BRCA1_v2.1", "mmu-Egfr_v1.0")
+
+
+# Exercise 3: Parse these primer sequences to extract ID, orientation, and sequence
+primers <- c(
+  "TP53_F: ATCGATCGATCG",
+  "TP53_R: GCTAGCTAGCTA",
+  "BRCA1_F: TTAATTAATTAA"
+)
+
+
+# Exercise 4: Calculate GC content for each sequence
+seqs <- c("ATCGATCG", "GGGGCCCC", "AAAATTTT")
+
+
+# Exercise 5: Extract chromosome and position from these coordinates
+coords <- c("chr1:12345-67890", "chr2:11111-22222", "chrX:99999-111111")
+
+
+```
+
+## Useful stringr Functions Summary
+
+```{r summary-table, echo=FALSE}
+tibble(
+  Function = c("str_length()", "str_c()", "str_sub()", "str_detect()",
+               "str_extract()", "str_replace()", "str_remove()",
+               "str_split()", "str_trim()", "str_to_upper()"),
+  Purpose = c("Get string length", "Combine strings", "Extract substring",
+              "Detect pattern", "Extract pattern", "Replace pattern",
+              "Remove pattern", "Split string", "Remove whitespace",
+              "Change case"),
+  Example = c('str_length("ATCG") → 4',
+              'str_c("A", "B") → "AB"',
+              'str_sub("ATCG", 1, 2) → "AT"',
+              'str_detect("TP53", "53") → TRUE',
+              'str_extract("Sample_001", "\\\\d+") → "001"',
+              'str_replace("TP53", "TP", "tp") → "tp53"',
+              'str_remove("gene_TP53", "gene_") → "TP53"',
+              'str_split("A;B;C", ";") → list("A","B","C")',
+              'str_trim("  TP53  ") → "TP53"',
+              'str_to_upper("tp53") → "TP53"')
+) %>%
+  knitr::kable()
+```
+
+## Regular Expression Cheat Sheet for Biology
+
+```{r regex-biology, eval=FALSE}
+# Gene IDs
+"ENSG\\d+"                    # Ensembl gene: ENSG followed by digits
+"[A-Z]+[0-9]+"                # Gene symbol: Letters then numbers (TP53)
+"\\w+_HUMAN"                  # UniProt human: anything_HUMAN
+
+# Sequences
+"ATG(?:...)*?(?:TAA|TAG|TGA)" # ORF: start codon to stop
+"[GC]"                         # G or C nucleotide
+"(?:CG)+"                      # CG repeats
+
+# Coordinates
+"chr[0-9XY]+:\\d+-\\d+"        # Genomic coordinates
+
+# Samples
+"Patient_\\d+"                 # Patient IDs
+"_Rep[12]"                     # Replicates 1 or 2
+"(?:Control|Treated)"          # Either control or treated
+```
+
+## Key Takeaways
+
+- stringr provides consistent, intuitive string manipulation
+- Regular expressions enable powerful pattern matching
+- Essential for cleaning messy biological data
+- Combine with dplyr for powerful data pipelines
+- All functions start with `str_` for easy discovery
+- Works seamlessly with pipes and tidyverse
+- Critical for parsing IDs, sequences, and annotations
+
+## Next Steps
+
+In Lesson 13, we'll learn lubridate for handling dates and times in time-series experiments!
+
+---
+
+**Homework:**
+
+1. Find a messy dataset with sample IDs or gene names
+2. Use stringr to extract meaningful metadata
+3. Clean and standardize the naming
+4. Create a clean tibble with parsed components
+5. Bonus: Work with actual DNA sequences and calculate composition statistics

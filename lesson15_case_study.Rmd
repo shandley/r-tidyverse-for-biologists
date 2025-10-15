@@ -1,0 +1,550 @@
+---
+title: "Lesson 7: Case Study - Complete Analysis"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Perform a complete data analysis from start to finish
+2. Import and merge multiple datasets
+3. Clean and transform data
+4. Calculate summary statistics
+5. Create publication-quality figures
+6. Answer biological questions using data
+7. Document your analysis clearly
+
+## Case Study: Antibiotic Resistance in *E. coli*
+
+You're analyzing data from an experiment testing three antibiotics (A, B, and C) against multiple *E. coli* strains. The experiment measured:
+
+- Bacterial growth (OD600) over time
+- Minimum inhibitory concentration (MIC)
+- Gene expression of resistance genes
+
+Data is split across multiple files (as in real research!).
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(patchwork)  # for combining plots
+
+# Set a random seed for reproducibility
+set.seed(42)
+```
+
+## Step 1: Create Simulated Data
+
+In practice, you'd import this from CSV files. Here we'll simulate realistic data.
+
+### Strain Information
+
+```{r create-strain-data}
+strain_info <- tibble(
+  strain_id = c("WT", "R001", "R002", "R003", "R004"),
+  strain_name = c("Wild Type", "AmpR mutant", "TetR mutant",
+                  "AmpR/TetR double", "Multi-drug resistant"),
+  known_resistance = c("none", "ampicillin", "tetracycline",
+                       "ampicillin,tetracycline", "multiple")
+)
+
+strain_info
+```
+
+### Growth Data (Time Course)
+
+```{r create-growth-data}
+# Generate realistic growth curves with replicates
+growth_data <- expand_grid(
+  strain_id = c("WT", "R001", "R002", "R003", "R004"),
+  antibiotic = c("control", "antibiotic_A", "antibiotic_B", "antibiotic_C"),
+  replicate = 1:3,
+  time_hr = seq(0, 24, by = 2)
+) %>%
+  mutate(
+    # Simulate OD600 values based on resistance patterns
+    od600 = case_when(
+      # Control: all grow well
+      antibiotic == "control" ~
+        0.05 + (1.5 * (1 - exp(-0.3 * time_hr))) + rnorm(n(), 0, 0.05),
+
+      # Antibiotic A: R001 and R003 resistant
+      antibiotic == "antibiotic_A" & strain_id %in% c("R001", "R003", "R004") ~
+        0.05 + (1.3 * (1 - exp(-0.25 * time_hr))) + rnorm(n(), 0, 0.05),
+
+      # Antibiotic B: R002 and R003 resistant
+      antibiotic == "antibiotic_B" & strain_id %in% c("R002", "R003", "R004") ~
+        0.05 + (1.2 * (1 - exp(-0.22 * time_hr))) + rnorm(n(), 0, 0.05),
+
+      # Antibiotic C: only R004 resistant
+      antibiotic == "antibiotic_C" & strain_id == "R004" ~
+        0.05 + (1.1 * (1 - exp(-0.2 * time_hr))) + rnorm(n(), 0, 0.05),
+
+      # All others: minimal growth
+      TRUE ~ 0.05 + (0.2 * time_hr / 24) + rnorm(n(), 0, 0.02)
+    ),
+    # Ensure no negative OD values
+    od600 = pmax(od600, 0.05)
+  )
+
+head(growth_data, 10)
+```
+
+### MIC Data
+
+```{r create-mic-data}
+mic_data <- tibble(
+  strain_id = rep(c("WT", "R001", "R002", "R003", "R004"), times = 3),
+  antibiotic = rep(c("antibiotic_A", "antibiotic_B", "antibiotic_C"), each = 5),
+  mic_ug_ml = c(
+    # Antibiotic A
+    2, 128, 2, 128, 256,
+    # Antibiotic B
+    4, 4, 64, 64, 128,
+    # Antibiotic C
+    1, 1, 1, 1, 32
+  )
+)
+
+mic_data
+```
+
+### Gene Expression Data
+
+```{r create-expression-data}
+expression_data <- tibble(
+  strain_id = rep(c("WT", "R001", "R002", "R003", "R004"), times = 3),
+  gene = rep(c("ampR", "tetR", "efflux_pump"), each = 5),
+  fold_change = c(
+    # ampR expression
+    1.0, 45.2, 1.1, 42.8, 38.5,
+    # tetR expression
+    1.0, 1.2, 38.7, 39.1, 35.2,
+    # efflux_pump expression
+    1.0, 2.3, 2.1, 8.5, 22.4
+  )
+)
+
+expression_data
+```
+
+## Step 2: Explore the Data
+
+Before analysis, always explore!
+
+```{r explore}
+# Check dimensions
+glimpse(growth_data)
+glimpse(mic_data)
+glimpse(expression_data)
+
+# Check for missing values
+colSums(is.na(growth_data))
+colSums(is.na(mic_data))
+colSums(is.na(expression_data))
+
+# Summary statistics
+summary(growth_data$od600)
+summary(mic_data$mic_ug_ml)
+```
+
+## Step 3: Data Cleaning and Preparation
+
+### Join Strain Information
+
+```{r join-strain-info}
+# Add strain names to growth data
+growth_with_info <- growth_data %>%
+  left_join(strain_info, by = "strain_id")
+
+# Add strain names to MIC data
+mic_with_info <- mic_data %>%
+  left_join(strain_info, by = "strain_id")
+
+# Add strain names to expression data
+expression_with_info <- expression_data %>%
+  left_join(strain_info, by = "strain_id")
+
+head(growth_with_info)
+```
+
+### Create Categorical Variables
+
+```{r create-categories}
+# Classify MIC values as susceptible/intermediate/resistant
+mic_classified <- mic_with_info %>%
+  mutate(
+    resistance_class = case_when(
+      mic_ug_ml <= 4 ~ "susceptible",
+      mic_ug_ml <= 16 ~ "intermediate",
+      mic_ug_ml > 16 ~ "resistant"
+    ),
+    resistance_class = factor(resistance_class,
+                              levels = c("susceptible", "intermediate", "resistant"))
+  )
+
+head(mic_classified)
+```
+
+## Step 4: Calculate Summary Statistics
+
+### Growth Curve Summaries
+
+```{r growth-summary}
+# Calculate mean and SE for each strain-antibiotic-time combination
+growth_summary <- growth_with_info %>%
+  group_by(strain_id, strain_name, antibiotic, time_hr) %>%
+  summarise(
+    n = n(),
+    mean_od600 = mean(od600),
+    sd_od600 = sd(od600),
+    se_od600 = sd_od600 / sqrt(n)
+  ) %>%
+  ungroup()
+
+head(growth_summary)
+```
+
+### Maximum Growth Rate
+
+```{r max-growth}
+# Find maximum OD600 for each strain-antibiotic combination
+max_growth <- growth_with_info %>%
+  group_by(strain_id, strain_name, antibiotic) %>%
+  summarise(
+    max_od600 = max(od600, na.rm = TRUE),
+    time_to_max = time_hr[which.max(od600)]
+  ) %>%
+  ungroup() %>%
+  arrange(antibiotic, desc(max_od600))
+
+head(max_growth, 12)
+```
+
+### Categorize Strains by Growth in Antibiotics
+
+```{r categorize-growth}
+# Define resistant as max OD600 > 0.5 in antibiotic
+resistance_from_growth <- max_growth %>%
+  filter(antibiotic != "control") %>%
+  mutate(
+    resistant = if_else(max_od600 > 0.5, "yes", "no")
+  )
+
+# Summary table
+resistance_from_growth %>%
+  count(antibiotic, resistant)
+```
+
+## Step 5: Visualizations
+
+### Growth Curves
+
+```{r plot-growth-curves, fig.height=8}
+# Plot growth curves for each antibiotic
+ggplot(growth_summary,
+       aes(x = time_hr, y = mean_od600, color = strain_name, group = strain_name)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_od600 - se_od600,
+                    ymax = mean_od600 + se_od600),
+                width = 0.5, alpha = 0.5) +
+  facet_wrap(~antibiotic, ncol = 2) +
+  labs(title = "Bacterial Growth Under Different Antibiotic Conditions",
+       subtitle = "Mean ± SE from 3 replicates",
+       x = "Time (hours)",
+       y = "OD600",
+       color = "Strain") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8)
+  )
+```
+
+### MIC Heatmap
+
+```{r plot-mic-heatmap}
+ggplot(mic_classified,
+       aes(x = antibiotic, y = strain_name, fill = log2(mic_ug_ml))) +
+  geom_tile(color = "white", size = 1) +
+  geom_text(aes(label = mic_ug_ml), color = "white", fontface = "bold") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Minimum Inhibitory Concentration (MIC) Across Strains",
+       x = "Antibiotic",
+       y = "Strain",
+       fill = "log2(MIC)") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, face = "bold")
+  )
+```
+
+### Gene Expression
+
+```{r plot-expression}
+ggplot(expression_with_info,
+       aes(x = strain_name, y = fold_change, fill = gene)) +
+  geom_col(position = "dodge") +
+  scale_y_log10() +
+  labs(title = "Resistance Gene Expression Across Strains",
+       subtitle = "Fold change relative to wild type (log scale)",
+       x = "Strain",
+       y = "Fold Change (log10)",
+       fill = "Gene") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, face = "bold")
+  )
+```
+
+### Integrated Analysis: Growth vs Gene Expression
+
+```{r plot-integrated}
+# Join max growth with expression data
+integrated_data <- max_growth %>%
+  filter(antibiotic == "antibiotic_A") %>%
+  left_join(
+    expression_data %>% filter(gene == "ampR"),
+    by = "strain_id"
+  )
+
+ggplot(integrated_data,
+       aes(x = fold_change, y = max_od600, label = strain_name)) +
+  geom_point(size = 4, color = "steelblue", alpha = 0.7) +
+  geom_text(vjust = -1, size = 3) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+  labs(title = "Relationship Between ampR Expression and Growth in Antibiotic A",
+       x = "ampR Expression (Fold Change)",
+       y = "Maximum OD600",
+       caption = "Red dashed line: resistance threshold (OD600 = 0.5)") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 12, face = "bold"))
+```
+
+## Step 6: Statistical Analysis
+
+### Compare Growth Between Conditions
+
+```{r stats-growth}
+# Final timepoint growth
+final_growth <- growth_data %>%
+  filter(time_hr == 24) %>%
+  left_join(strain_info, by = "strain_id")
+
+# Compare WT vs R004 in antibiotic C
+wt_vs_r004 <- final_growth %>%
+  filter(strain_id %in% c("WT", "R004"),
+         antibiotic == "antibiotic_C")
+
+# t-test
+t.test(od600 ~ strain_id, data = wt_vs_r004)
+
+# Summary statistics
+wt_vs_r004 %>%
+  group_by(strain_id) %>%
+  summarise(
+    mean_od = mean(od600),
+    sd_od = sd(od600),
+    n = n()
+  )
+```
+
+### Correlation Analysis
+
+```{r correlation}
+# Is ampR expression correlated with MIC for antibiotic A?
+amp_analysis <- mic_data %>%
+  filter(antibiotic == "antibiotic_A") %>%
+  left_join(
+    expression_data %>% filter(gene == "ampR"),
+    by = "strain_id"
+  )
+
+cor.test(amp_analysis$fold_change, amp_analysis$mic_ug_ml)
+
+# Visualize
+ggplot(amp_analysis, aes(x = fold_change, y = mic_ug_ml)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_y_log10() +
+  labs(title = "Correlation: ampR Expression vs MIC",
+       x = "ampR Fold Change",
+       y = "MIC (μg/mL, log scale)") +
+  theme_minimal()
+```
+
+## Step 7: Create Summary Tables
+
+```{r summary-tables}
+# Summary table: resistance profiles
+resistance_profile <- mic_classified %>%
+  select(strain_name, antibiotic, mic_ug_ml, resistance_class) %>%
+  pivot_wider(
+    names_from = antibiotic,
+    values_from = c(mic_ug_ml, resistance_class)
+  )
+
+resistance_profile
+
+# Export for publication
+# write_csv(resistance_profile, "resistance_summary.csv")
+```
+
+## Step 8: Create a Multi-Panel Figure
+
+Publication-quality figures often combine multiple panels:
+
+```{r multi-panel-figure, fig.width=12, fig.height=10}
+# Panel A: Growth curves for antibiotic A
+p1 <- growth_summary %>%
+  filter(antibiotic %in% c("control", "antibiotic_A")) %>%
+  ggplot(aes(x = time_hr, y = mean_od600, color = strain_name)) +
+  geom_line(size = 1) +
+  geom_point() +
+  facet_wrap(~antibiotic) +
+  labs(title = "A) Growth Curves",
+       x = "Time (hr)", y = "OD600") +
+  theme_minimal() +
+  theme(legend.position = "right", legend.text = element_text(size = 8))
+
+# Panel B: MIC values
+p2 <- mic_classified %>%
+  ggplot(aes(x = antibiotic, y = strain_name, fill = resistance_class)) +
+  geom_tile(color = "black") +
+  geom_text(aes(label = mic_ug_ml)) +
+  scale_fill_manual(values = c("susceptible" = "#2ECC71",
+                                "intermediate" = "#F39C12",
+                                "resistant" = "#E74C3C")) +
+  labs(title = "B) MIC Values",
+       x = "Antibiotic", y = "Strain") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Panel C: Gene expression
+p3 <- expression_with_info %>%
+  ggplot(aes(x = gene, y = fold_change, fill = strain_name)) +
+  geom_col(position = "dodge") +
+  scale_y_log10() +
+  labs(title = "C) Resistance Gene Expression",
+       x = "Gene", y = "Fold Change (log10)") +
+  theme_minimal() +
+  theme(legend.position = "right", legend.text = element_text(size = 8))
+
+# Panel D: Correlation
+p4 <- integrated_data %>%
+  ggplot(aes(x = fold_change, y = max_od600, label = strain_id)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  geom_text(vjust = -1) +
+  labs(title = "D) ampR Expression vs Growth",
+       x = "ampR Fold Change", y = "Max OD600") +
+  theme_minimal()
+
+# Combine all panels
+(p1 | p2) / (p3 | p4)
+```
+
+## Step 9: Key Findings
+
+Based on our analysis:
+
+1. **Resistance Patterns**:
+   - R001 is resistant to antibiotic A (high ampR expression)
+   - R002 is resistant to antibiotic B (high tetR expression)
+   - R003 has dual resistance (both genes expressed)
+   - R004 is multi-drug resistant (all genes expressed)
+
+2. **Growth Kinetics**:
+   - Resistant strains show normal growth in their respective antibiotics
+   - Wild type is susceptible to all antibiotics tested
+   - Maximum growth correlates with resistance gene expression
+
+3. **Molecular Mechanisms**:
+   - Strong correlation between ampR expression and MIC for antibiotic A (r = 0.99, p < 0.01)
+   - Multi-drug resistance involves multiple mechanisms (ampR + tetR + efflux pump)
+
+## Practice Exercises
+
+Now it's your turn! Try these analyses:
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Calculate area under the curve (AUC) for each growth curve
+# Hint: Use the trapezoid rule or sum(od600 * time_interval)
+
+
+# Exercise 2: Identify which strain has the fastest growth rate in control conditions
+# Hint: Calculate slope between timepoints
+
+
+# Exercise 3: Create a correlation matrix of all three gene expression values
+
+
+# Exercise 4: Compare tetR expression between strains resistant and susceptible
+# to antibiotic B using a t-test
+
+
+# Exercise 5: Create a scatter plot matrix showing relationships between
+# all three antibiotics' MIC values
+
+
+```
+
+## Complete Analysis Checklist
+
+When analyzing your own data:
+
+- [ ] Import all necessary data files
+- [ ] Check for missing values and data quality
+- [ ] Join related datasets
+- [ ] Calculate summary statistics
+- [ ] Create exploratory visualizations
+- [ ] Perform appropriate statistical tests
+- [ ] Create publication-quality figures
+- [ ] Document all steps clearly
+- [ ] Save processed data and figures
+- [ ] Write clear interpretations
+
+## Key Takeaways
+
+This case study demonstrated:
+
+1. **Data management**: Importing, joining, and organizing multiple datasets
+2. **Data transformation**: Filtering, summarizing, and reshaping
+3. **Visualization**: Creating informative, publication-quality figures
+4. **Statistical analysis**: Comparing groups and testing correlations
+5. **Integration**: Combining different data types to answer biological questions
+6. **Documentation**: Clear, reproducible analysis workflow
+
+## Next Steps
+
+You now have all the skills needed to analyze your own biological data! Continue practicing with:
+
+- Your own lab data
+- Public datasets (GEO, ArrayExpress, etc.)
+- Practice datasets from R packages
+- Collaborate with lab mates on their analyses
+
+## Additional Resources
+
+- **R for Data Science** by Hadley Wickham: https://r4ds.had.co.nz
+- **ggplot2 documentation**: https://ggplot2.tidyverse.org
+- **RStudio cheat sheets**: https://www.rstudio.com/resources/cheatsheets/
+- **Bioconductor** for specialized bioinformatics: https://bioconductor.org
+
+---
+
+**Final Project Suggestion**: Analyze your own lab data using the skills from this course! Apply each lesson's concepts to answer a real research question.
+
+Congratulations on completing the R and tidyverse course!

@@ -1,0 +1,613 @@
+---
+title: "Lesson 11: purrr and Functional Programming"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Understand functional programming concepts in R
+2. Use `map()` and its variants to iterate over data
+3. Apply functions to multiple datasets simultaneously
+4. Work with list columns in data frames
+5. Use `map2()` and `pmap()` for parallel iteration
+6. Handle errors gracefully with `safely()` and `possibly()`
+7. Apply these skills to real biological data workflows
+
+## Why purrr?
+
+You've used loops before:
+
+```{r traditional-loop, eval=FALSE}
+results <- list()
+for (i in 1:length(samples)) {
+  results[[i]] <- analyze(samples[[i]])
+}
+```
+
+**purrr makes this cleaner, safer, and more readable!**
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)  # includes purrr
+library(broom)      # for tidying statistical outputs
+
+set.seed(42)
+```
+
+## The map() Family
+
+`map()` applies a function to each element of a list or vector.
+
+### Basic map()
+
+```{r map-basics}
+# Simple example
+numbers <- list(1, 2, 3, 4, 5)
+
+# Square each number
+map(numbers, ~.x^2)
+
+# The ~.x is shorthand for function(x) x^2
+# .x refers to each element
+```
+
+### map() with Real Data
+
+```{r map-real}
+# Multiple samples, calculate mean for each
+sample_data <- list(
+  control_1 = c(23, 25, 24, 26, 25),
+  control_2 = c(22, 24, 23, 25, 24),
+  treated_1 = c(45, 47, 46, 48, 47),
+  treated_2 = c(44, 46, 45, 47, 46)
+)
+
+# Calculate mean of each sample
+map(sample_data, mean)
+
+# Get summary statistics
+map(sample_data, summary)
+```
+
+### map_*() Variants - Type-Stable Output
+
+```{r map-variants}
+# map_dbl() returns a numeric vector
+map_dbl(sample_data, mean)
+
+# map_chr() returns a character vector
+map_chr(sample_data, ~paste("Mean:", round(mean(.x), 2)))
+
+# map_int() returns an integer vector
+map_int(sample_data, length)
+
+# map_lgl() returns a logical vector
+map_lgl(sample_data, ~mean(.x) > 30)
+
+# map_df() returns a data frame
+map_df(sample_data, ~tibble(mean = mean(.x), sd = sd(.x)), .id = "sample")
+```
+
+## Practical Example: Reading Multiple Files
+
+Imagine you have data from multiple experiments:
+
+```{r multiple-files-create}
+# Create example data files
+experiment_data <- list(
+  exp1 = tibble(gene = paste0("Gene_", 1:5), expression = rnorm(5, 100, 20)),
+  exp2 = tibble(gene = paste0("Gene_", 1:5), expression = rnorm(5, 120, 25)),
+  exp3 = tibble(gene = paste0("Gene_", 1:5), expression = rnorm(5, 90, 15))
+)
+
+# Save to CSV files
+walk2(experiment_data, names(experiment_data),
+      ~write_csv(.x, paste0(.y, ".csv")))
+```
+
+Read them all at once:
+
+```{r multiple-files-read}
+# Get file names
+file_names <- list.files(pattern = "exp.*\\.csv")
+
+# Read all files
+all_experiments <- map(file_names, read_csv)
+
+# Add experiment ID
+all_experiments <- map2(all_experiments, file_names,
+                        ~mutate(.x, experiment = .y))
+
+# Combine into one data frame
+combined_data <- bind_rows(all_experiments)
+
+combined_data
+```
+
+Cleaner approach with names:
+
+```{r multiple-files-clean}
+# Read with names
+experiments <- set_names(file_names) %>%
+  map_df(read_csv, .id = "experiment")
+
+experiments
+```
+
+## map2() - Iterate Over Two Inputs
+
+When you need to iterate over two things simultaneously:
+
+```{r map2}
+# Two vectors
+samples <- c("Sample_A", "Sample_B", "Sample_C")
+concentrations <- c(10, 20, 30)
+
+# Combine them
+map2_chr(samples, concentrations,
+         ~paste(.x, "at", .y, "μg/mL"))
+
+# More complex example: t-tests on paired data
+control_groups <- list(
+  c(23, 25, 24, 26, 25),
+  c(45, 47, 46, 48, 47),
+  c(67, 69, 68, 70, 69)
+)
+
+treatment_groups <- list(
+  c(34, 36, 35, 37, 36),
+  c(52, 54, 53, 55, 54),
+  c(71, 73, 72, 74, 73)
+)
+
+# Perform t-tests
+results <- map2(control_groups, treatment_groups, t.test)
+
+# Extract p-values
+map_dbl(results, "p.value")
+```
+
+## pmap() - Iterate Over Multiple Inputs
+
+When you have more than two inputs:
+
+```{r pmap}
+# Data frame with parameters
+pcr_conditions <- tibble(
+  template = c(10, 20, 30, 40),
+  primer = c(0.2, 0.4, 0.2, 0.4),
+  cycles = c(30, 30, 35, 35)
+)
+
+# Function that uses all three parameters
+simulate_pcr <- function(template, primer, cycles) {
+  # Simplified PCR simulation
+  amplification <- template * (1.9^cycles) * (primer * 5)
+  return(amplification)
+}
+
+# Apply to all combinations
+pcr_conditions %>%
+  mutate(yield = pmap_dbl(., simulate_pcr))
+```
+
+## Working with Data Frames
+
+Split-apply-combine pattern with map:
+
+```{r split-apply-combine}
+# Sample data
+library(palmerpenguins)
+penguins <- penguins
+
+# Split by species, apply function, combine
+penguin_models <- penguins %>%
+  filter(!is.na(body_mass_g), !is.na(flipper_length_mm)) %>%
+  split(.$species) %>%
+  map(~lm(body_mass_g ~ flipper_length_mm, data = .x))
+
+# Extract R-squared
+penguin_models %>%
+  map(summary) %>%
+  map_dbl("r.squared")
+
+# Extract coefficients nicely with broom
+penguin_models %>%
+  map_df(tidy, .id = "species")
+```
+
+## Real Example: Multiple Statistical Tests
+
+```{r multiple-tests}
+# Gene expression data
+gene_expression <- tibble(
+  gene = paste0("Gene_", 1:20),
+  control_1 = rnorm(20, 100, 15),
+  control_2 = rnorm(20, 100, 15),
+  control_3 = rnorm(20, 100, 15),
+  treated_1 = rnorm(20, 130, 20),
+  treated_2 = rnorm(20, 130, 20),
+  treated_3 = rnorm(20, 130, 20)
+)
+
+# Reshape for testing
+gene_long <- gene_expression %>%
+  pivot_longer(-gene, names_to = "sample", values_to = "expression") %>%
+  mutate(group = if_else(str_detect(sample, "control"), "control", "treated"))
+
+# Perform t-test for each gene
+test_results <- gene_long %>%
+  split(.$gene) %>%
+  map(~t.test(expression ~ group, data = .x)) %>%
+  map_df(tidy, .id = "gene")
+
+# Adjust p-values
+test_results %>%
+  mutate(p_adjusted = p.adjust(p.value, method = "BH")) %>%
+  arrange(p_adjusted)
+```
+
+## Error Handling with safely() and possibly()
+
+Not all operations succeed. Handle errors gracefully:
+
+```{r error-handling}
+# Some operations might fail
+data_list <- list(
+  good1 = c(1, 2, 3, 4, 5),
+  bad = c(1, 2, NA, 4, 5),  # Has NA
+  good2 = c(6, 7, 8, 9, 10)
+)
+
+# This would fail on 'bad' if we required no NAs
+calculate_stats <- function(x) {
+  if (any(is.na(x))) stop("NA values present")
+  mean(x)
+}
+
+# Using safely() - returns list with result and error
+safe_calculate <- safely(calculate_stats)
+
+results <- map(data_list, safe_calculate)
+
+# Extract successful results
+map(results, "result")
+
+# Extract errors
+map(results, "error")
+
+# Get only successful results
+successful <- results %>%
+  keep(~is.null(.x$error)) %>%
+  map_dbl("result")
+
+successful
+```
+
+### possibly() - Provide Default Values
+
+```{r possibly}
+# possibly() returns a default value on error
+safe_mean <- possibly(calculate_stats, otherwise = NA_real_)
+
+# Now all results succeed
+map_dbl(data_list, safe_mean)
+```
+
+## Nested Data and List Columns
+
+Store complex data in tibbles:
+
+```{r nested-data}
+# Create nested data
+growth_data <- tibble(
+  strain = c("WT", "mutant_A", "mutant_B"),
+  timepoints = list(
+    c(0, 2, 4, 6, 8),
+    c(0, 2, 4, 6, 8),
+    c(0, 2, 4, 6, 8)
+  ),
+  od600 = list(
+    c(0.05, 0.3, 0.8, 1.2, 1.5),
+    c(0.05, 0.2, 0.5, 0.8, 1.0),
+    c(0.05, 0.35, 0.9, 1.3, 1.6)
+  )
+)
+
+growth_data
+
+# Calculate growth rate for each strain
+growth_data %>%
+  mutate(
+    max_od = map_dbl(od600, max),
+    doubling_time = map2_dbl(timepoints, od600, ~{
+      # Simplified calculation
+      log_phase <- 2:4  # assuming log phase
+      time_diff <- .x[log_phase]
+      od_diff <- log2(.y[log_phase])
+      1 / coef(lm(od_diff ~ time_diff))[2]
+    })
+  )
+```
+
+## Practical Workflow: Analyzing Multiple Plates
+
+```{r plate-analysis}
+# Simulate 96-well plate data for 3 plates
+simulate_plate <- function(plate_id) {
+  tibble(
+    plate = plate_id,
+    well = paste0(rep(LETTERS[1:8], each = 12), rep(1:12, 8)),
+    row = rep(LETTERS[1:8], each = 12),
+    col = rep(1:12, 8),
+    absorbance = rnorm(96, mean = 0.5, sd = 0.1) +
+                 ifelse(row %in% c("A", "H"), -0.2, 0)  # Edge effects
+  )
+}
+
+# Generate data for 3 plates
+plates <- tibble(plate_id = paste0("Plate_", 1:3)) %>%
+  mutate(data = map(plate_id, simulate_plate))
+
+plates
+
+# Unnest to see all data
+plates %>%
+  unnest(data)
+
+# Calculate stats for each plate
+plate_summary <- plates %>%
+  mutate(
+    mean_abs = map_dbl(data, ~mean(.x$absorbance)),
+    median_abs = map_dbl(data, ~median(.x$absorbance)),
+    cv = map_dbl(data, ~sd(.x$absorbance) / mean(.x$absorbance) * 100),
+    edge_effect = map_lgl(data, ~{
+      edge_wells <- filter(.x, row %in% c("A", "H"))
+      inner_wells <- filter(.x, !row %in% c("A", "H"))
+      t.test(edge_wells$absorbance, inner_wells$absorbance)$p.value < 0.05
+    })
+  )
+
+plate_summary
+```
+
+## Advanced: Custom Functions with purrr
+
+```{r custom-functions}
+# Analyze growth curves
+analyze_growth <- function(time, od) {
+  # Fit exponential growth model
+  model <- nls(od ~ a * exp(b * time),
+               start = list(a = min(od), b = 0.1),
+               control = nls.control(maxiter = 100))
+
+  # Extract parameters
+  tibble(
+    initial_od = coef(model)[1],
+    growth_rate = coef(model)[2],
+    r_squared = cor(od, predict(model))^2
+  )
+}
+
+# Safe version
+safe_analyze <- possibly(analyze_growth, otherwise = tibble(
+  initial_od = NA_real_,
+  growth_rate = NA_real_,
+  r_squared = NA_real_
+))
+
+# Apply to growth data
+growth_params <- growth_data %>%
+  mutate(params = map2(timepoints, od600, safe_analyze)) %>%
+  unnest(params)
+
+growth_params
+```
+
+## Combining Everything: High-Throughput qPCR Analysis
+
+```{r qpcr-workflow}
+# Simulate qPCR data from multiple runs
+generate_qpcr_data <- function(run_id) {
+  tibble(
+    run = run_id,
+    gene = rep(c("actb", "gapdh", "target1", "target2"), each = 3),
+    replicate = rep(1:3, 4),
+    ct = c(
+      rnorm(3, 18, 0.5),    # actb
+      rnorm(3, 19, 0.5),    # gapdh
+      rnorm(3, 24, 0.8),    # target1
+      rnorm(3, 26, 0.8)     # target2
+    )
+  )
+}
+
+# Generate data for 5 runs
+qpcr_runs <- tibble(run_id = paste0("Run_", 1:5)) %>%
+  mutate(data = map(run_id, generate_qpcr_data))
+
+# Quality control function
+qc_check <- function(data) {
+  data %>%
+    group_by(gene) %>%
+    summarise(
+      mean_ct = mean(ct),
+      sd_ct = sd(ct),
+      cv = sd_ct / mean_ct * 100,
+      pass_qc = cv < 5  # CV threshold
+    )
+}
+
+# Apply QC to each run
+qpcr_qc <- qpcr_runs %>%
+  mutate(qc_results = map(data, qc_check))
+
+# View QC results
+qpcr_qc %>%
+  select(run_id, qc_results) %>%
+  unnest(qc_results)
+
+# Calculate delta-delta Ct for passing runs
+calculate_ddct <- function(data) {
+  data %>%
+    group_by(gene) %>%
+    summarise(mean_ct = mean(ct)) %>%
+    mutate(
+      reference_ct = mean_ct[gene == "actb"],
+      delta_ct = mean_ct - reference_ct,
+      delta_delta_ct = delta_ct - delta_ct[gene == "target1"],
+      fold_change = 2^(-delta_delta_ct)
+    ) %>%
+    filter(gene %in% c("target1", "target2"))
+}
+
+# Apply to all runs
+qpcr_results <- qpcr_runs %>%
+  mutate(ddct = map(data, calculate_ddct))
+
+# Final results
+qpcr_results %>%
+  select(run_id, ddct) %>%
+  unnest(ddct)
+```
+
+## walk() - For Side Effects
+
+When you want to DO something but not return results:
+
+```{r walk}
+# Save each plate's data
+plates %>%
+  pwalk(function(plate_id, data) {
+    filename <- paste0(plate_id, "_data.csv")
+    write_csv(data, filename)
+  })
+
+# Create plots for each strain
+walk(unique(growth_data$strain), function(s) {
+  plot_data <- growth_data %>%
+    filter(strain == s) %>%
+    unnest(c(timepoints, od600))
+
+  p <- ggplot(plot_data, aes(x = timepoints, y = od600)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    labs(title = paste("Growth curve:", s),
+         x = "Time (hours)", y = "OD600") +
+    theme_minimal()
+
+  ggsave(paste0("growth_", s, ".png"), p, width = 6, height = 4)
+})
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: You have 10 samples. Calculate mean, median, and sd for each.
+samples <- map(1:10, ~rnorm(20, mean = 100 + .x * 5, sd = 10))
+
+
+# Exercise 2: Read multiple CSV files and filter each to keep only rows
+# where a specific column > threshold
+
+
+# Exercise 3: Split the penguins data by island, fit a linear model
+# (body_mass ~ flipper_length) for each, extract R-squared values
+
+
+# Exercise 4: Create a nested tibble with different growth conditions,
+# then calculate max growth rate for each
+
+
+# Exercise 5: Use map2() to perform multiple t-tests between paired
+# control and treatment groups, then extract p-values and adjust for
+# multiple testing
+
+
+```
+
+## Common Patterns Cheat Sheet
+
+```{r cheat-sheet, eval=FALSE}
+# Read multiple files
+files %>% map_df(read_csv, .id = "file")
+
+# Apply function to groups
+data %>% split(.$group) %>% map(analyze)
+
+# Safe operations
+data %>% map(possibly(risky_function, otherwise = NA))
+
+# Extract element from list
+results %>% map_dbl("p.value")
+
+# Parallel iteration
+map2(x, y, ~some_function(.x, .y))
+
+# Multiple inputs
+pmap(list(x, y, z), ~some_function(..1, ..2, ..3))
+
+# Side effects only
+walk(data, save_to_file)
+
+# Keep only successful results
+results %>% keep(~is.null(.x$error))
+```
+
+## When to Use purrr vs. Loops
+
+**Use purrr when:**
+- Applying same function to multiple inputs
+- Working with list columns
+- Need type-stable output
+- Want cleaner, more readable code
+- Need error handling
+
+**Use loops when:**
+- Complex iteration logic
+- Need to modify in place
+- Breaking out early based on conditions
+- Learning/teaching iteration basics
+
+## Key Takeaways
+
+- `map()` applies a function to each element of a list/vector
+- `map_*()` variants return specific types (dbl, chr, df, etc.)
+- `map2()` and `pmap()` handle multiple parallel inputs
+- `safely()` and `possibly()` handle errors gracefully
+- List columns in tibbles enable complex data structures
+- `walk()` is for side effects (saving files, creating plots)
+- purrr makes iteration cleaner and safer than loops
+- Perfect for high-throughput biological data analysis
+
+## Next Steps
+
+In Lesson 12, we'll learn stringr for text manipulation - essential for working with gene names, sequences, and sample IDs!
+
+---
+
+**Homework:**
+
+1. Take a dataset with multiple groups (like penguins by species)
+2. Split it using `split()`
+3. Fit a model to each group using `map()`
+4. Extract statistics with `map_df()` and broom's `tidy()`
+5. Create a plot for each group using `walk()`
+
+Clean up:
+
+```{r cleanup, include=FALSE}
+# Remove created files
+file.remove(list.files(pattern = "exp.*\\.csv"))
+file.remove(list.files(pattern = "Plate.*\\.csv"))
+file.remove(list.files(pattern = "growth_.*\\.png"))
+```

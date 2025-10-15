@@ -1,0 +1,634 @@
+---
+title: "Lesson 14: Advanced tidyr - Nested Data and List Columns"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Create and work with nested data frames
+2. Use list columns to store complex data
+3. Combine nesting with purrr for powerful workflows
+4. Unnest data at different levels
+5. Perform group-wise operations efficiently
+6. Store models and plots in data frames
+7. Build reproducible analysis pipelines
+
+## Why Nested Data?
+
+Sometimes your data has a natural hierarchy:
+- **Multiple measurements** per sample
+- **Time series** for each patient
+- **Replicates** for each experimental condition
+- **Models** fitted to each group
+- **Plots** for each subset
+
+Nested data keeps everything organized in one place!
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(broom)  # for tidying model outputs
+
+set.seed(42)
+```
+
+## Introduction to List Columns
+
+Regular tibbles hold atomic vectors (numbers, strings, etc.):
+
+```{r regular-tibble}
+regular_data <- tibble(
+  id = c("A", "B", "C"),
+  value = c(10, 20, 30)
+)
+
+regular_data
+```
+
+List columns can hold ANY object (data frames, models, plots, etc.):
+
+```{r list-column}
+data_with_list <- tibble(
+  id = c("A", "B", "C"),
+  measurements = list(
+    c(10, 12, 11),
+    c(20, 22, 21),
+    c(30, 32, 31)
+  )
+)
+
+data_with_list
+
+# Access list column
+data_with_list$measurements[[1]]
+```
+
+## Creating Nested Data with nest()
+
+### nest() - Collapse Rows into Lists
+
+```{r nest-basic}
+library(palmerpenguins)
+
+# Regular data
+penguins %>%
+  head(6)
+
+# Nested by species
+nested_penguins <- penguins %>%
+  group_by(species) %>%
+  nest()
+
+nested_penguins
+
+# What's in the 'data' column?
+nested_penguins$data[[1]]
+```
+
+### Nesting Specific Columns
+
+```{r nest-specific}
+# Nest only measurement columns
+penguins %>%
+  group_by(species, island) %>%
+  nest(measurements = c(bill_length_mm, bill_depth_mm,
+                        flipper_length_mm, body_mass_g))
+```
+
+## unnest() - Expand Nested Data
+
+```{r unnest}
+# Go back to regular format
+nested_penguins %>%
+  unnest(data)
+
+# Unnest and keep grouping
+nested_penguins %>%
+  unnest(data) %>%
+  group_by(species) %>%
+  summarise(mean_mass = mean(body_mass_g, na.rm = TRUE))
+```
+
+## Combining nest() with purrr
+
+The real power comes from combining nesting with mapping!
+
+### Example: Fit Models to Each Group
+
+```{r nest-models}
+# Fit linear model for each species
+penguin_models <- penguins %>%
+  filter(!is.na(body_mass_g), !is.na(flipper_length_mm)) %>%
+  group_by(species) %>%
+  nest() %>%
+  mutate(
+    # Fit model to each group
+    model = map(data, ~lm(body_mass_g ~ flipper_length_mm, data = .x)),
+    # Extract model statistics
+    glance = map(model, glance),
+    # Extract coefficients
+    tidy = map(model, tidy),
+    # Get predictions
+    augment = map2(model, data, augment)
+  )
+
+penguin_models
+```
+
+### Extract Model Statistics
+
+```{r extract-stats}
+# R-squared for each species
+penguin_models %>%
+  unnest(glance) %>%
+  select(species, r.squared, p.value, AIC)
+
+# Coefficients for each species
+penguin_models %>%
+  unnest(tidy) %>%
+  select(species, term, estimate, p.value)
+```
+
+## Practical Example: Multiple qPCR Runs
+
+```{r qpcr-example}
+# Simulate qPCR data from multiple experiments
+generate_qpcr <- function(exp_id) {
+  tibble(
+    experiment = exp_id,
+    gene = rep(c("ACTB", "GAPDH", "TP53", "BRCA1"), each = 3),
+    replicate = rep(1:3, 4),
+    ct_value = c(
+      rnorm(3, 18, 0.3),   # ACTB
+      rnorm(3, 19, 0.3),   # GAPDH
+      rnorm(3, 24, 0.5),   # TP53
+      rnorm(3, 26, 0.5)    # BRCA1
+    )
+  )
+}
+
+# Create data for 5 experiments
+qpcr_data <- tibble(exp_id = paste0("Exp_", 1:5)) %>%
+  mutate(data = map(exp_id, generate_qpcr))
+
+qpcr_data
+
+# Calculate delta-Ct for each experiment
+qpcr_results <- qpcr_data %>%
+  mutate(
+    analysis = map(data, ~{
+      .x %>%
+        group_by(gene) %>%
+        summarise(mean_ct = mean(ct_value)) %>%
+        mutate(
+          reference_ct = mean_ct[gene == "ACTB"],
+          delta_ct = mean_ct - reference_ct,
+          fold_change = 2^(-delta_ct)
+        )
+    })
+  )
+
+# View results
+qpcr_results %>%
+  select(exp_id, analysis) %>%
+  unnest(analysis) %>%
+  filter(gene %in% c("TP53", "BRCA1"))
+```
+
+## Storing Plots in Data Frames
+
+```{r plots-in-df}
+# Create plot for each species
+penguin_plots <- penguins %>%
+  filter(!is.na(body_mass_g), !is.na(flipper_length_mm)) %>%
+  group_by(species) %>%
+  nest() %>%
+  mutate(
+    plot = map2(data, species, ~{
+      ggplot(.x, aes(x = flipper_length_mm, y = body_mass_g)) +
+        geom_point(alpha = 0.5) +
+        geom_smooth(method = "lm") +
+        labs(title = paste("Species:", .y),
+             x = "Flipper Length (mm)",
+             y = "Body Mass (g)") +
+        theme_minimal()
+    })
+  )
+
+# View a plot
+penguin_plots$plot[[1]]
+
+# Save all plots
+walk2(penguin_plots$plot, penguin_plots$species,
+      ~ggsave(paste0("penguin_", .y, ".png"), .x, width = 6, height = 4))
+```
+
+## Complex Nesting: Time Series Data
+
+```{r time-series-nested}
+# Simulate bacterial growth for multiple strains and conditions
+growth_data <- expand_grid(
+  strain = c("WT", "mutant_A", "mutant_B"),
+  antibiotic = c("none", "low", "high"),
+  replicate = 1:3
+) %>%
+  mutate(
+    data = pmap(list(strain, antibiotic, replicate), function(s, a, r) {
+      # Simulate different growth patterns
+      baseline <- if_else(s == "WT", 1.5, if_else(s == "mutant_A", 1.0, 1.8))
+      effect <- case_when(
+        a == "none" ~ 1.0,
+        a == "low" ~ if_else(s == "mutant_B", 0.9, 0.6),
+        a == "high" ~ if_else(s == "mutant_B", 0.7, 0.2)
+      )
+
+      tibble(
+        time_hr = seq(0, 24, by = 2),
+        od600 = 0.05 + baseline * effect * (1 - exp(-0.3 * time_hr)) +
+                rnorm(13, 0, 0.05)
+      ) %>%
+        mutate(od600 = pmax(od600, 0.05))
+    })
+  )
+
+growth_data
+
+# Calculate max growth rate for each
+growth_summary <- growth_data %>%
+  mutate(
+    max_od = map_dbl(data, ~max(.x$od600)),
+    time_to_max = map_dbl(data, ~.x$time_hr[which.max(.x$od600)])
+  )
+
+growth_summary %>%
+  select(strain, antibiotic, replicate, max_od, time_to_max)
+```
+
+## Multi-Level Nesting
+
+```{r multi-level-nest}
+# Nest at multiple levels
+multi_nested <- penguins %>%
+  filter(!is.na(body_mass_g)) %>%
+  group_by(species, island) %>%
+  nest() %>%
+  group_by(species) %>%
+  nest(island_data = c(island, data))
+
+multi_nested
+
+# Access deeply nested data
+multi_nested$island_data[[1]]
+multi_nested$island_data[[1]]$data[[1]]
+```
+
+## Practical Workflow: Plate Reader Analysis
+
+```{r plate-reader}
+# Simulate 96-well plate data for multiple plates
+simulate_plate <- function(plate_id, treatment) {
+  tibble(
+    plate = plate_id,
+    treatment = treatment,
+    well = paste0(rep(LETTERS[1:8], each = 12), rep(1:12, 8)),
+    row = rep(LETTERS[1:8], each = 12),
+    col = rep(1:12, 8),
+    absorbance = rnorm(96, mean = 0.5 + treatment * 0.3, sd = 0.05) +
+                 ifelse(row %in% c("A", "H") | col %in% c(1, 12), -0.1, 0)
+  )
+}
+
+# Multiple plates with different treatments
+plate_data <- tibble(
+  plate_id = paste0("Plate_", 1:6),
+  treatment_level = rep(c(0, 0.5, 1.0), each = 2)
+) %>%
+  mutate(
+    data = map2(plate_id, treatment_level, simulate_plate),
+
+    # Calculate statistics for each plate
+    stats = map(data, ~{
+      .x %>%
+        summarise(
+          mean_abs = mean(absorbance),
+          median_abs = median(absorbance),
+          cv = sd(absorbance) / mean(absorbance) * 100
+        )
+    }),
+
+    # Identify edge wells
+    edge_effect = map(data, ~{
+      edge <- filter(.x, row %in% c("A", "H") | col %in% c(1, 12))
+      inner <- filter(.x, !row %in% c("A", "H"), !col %in% c(1, 12))
+      t.test(edge$absorbance, inner$absorbance)$p.value
+    })
+  )
+
+# Summary results
+plate_data %>%
+  select(plate_id, treatment_level, stats, edge_effect) %>%
+  unnest(stats)
+```
+
+## Combining Multiple Operations
+
+```{r complex-pipeline}
+# Complete analysis pipeline
+analysis_pipeline <- penguins %>%
+  filter(!is.na(body_mass_g), !is.na(flipper_length_mm)) %>%
+
+  # Nest by species
+  group_by(species) %>%
+  nest() %>%
+
+  # Multiple operations on each group
+  mutate(
+    # Sample size
+    n = map_int(data, nrow),
+
+    # Summary statistics
+    summary = map(data, ~{
+      .x %>%
+        summarise(
+          mean_mass = mean(body_mass_g),
+          sd_mass = sd(body_mass_g),
+          mean_flipper = mean(flipper_length_mm)
+        )
+    }),
+
+    # Correlation
+    correlation = map_dbl(data, ~{
+      cor(.x$body_mass_g, .x$flipper_length_mm, use = "complete.obs")
+    }),
+
+    # Model
+    model = map(data, ~lm(body_mass_g ~ flipper_length_mm, data = .x)),
+
+    # Model stats
+    model_stats = map(model, glance),
+
+    # Plot
+    plot = map2(data, species, ~{
+      ggplot(.x, aes(x = flipper_length_mm, y = body_mass_g)) +
+        geom_point(alpha = 0.5) +
+        geom_smooth(method = "lm", se = TRUE) +
+        labs(title = .y) +
+        theme_minimal()
+    })
+  )
+
+# View comprehensive results
+analysis_pipeline %>%
+  select(species, n, summary, correlation, model_stats) %>%
+  unnest(c(summary, model_stats))
+```
+
+## hoist() - Extract from Nested Lists
+
+When you have nested lists, `hoist()` extracts specific elements:
+
+```{r hoist}
+# Complex nested structure
+complex_data <- tibble(
+  id = c("A", "B", "C"),
+  results = list(
+    list(mean = 10, sd = 2, n = 5),
+    list(mean = 20, sd = 3, n = 6),
+    list(mean = 30, sd = 4, n = 7)
+  )
+)
+
+complex_data
+
+# Extract specific elements
+complex_data %>%
+  hoist(results,
+        mean = "mean",
+        sample_size = "n")
+```
+
+## unnest_longer() and unnest_wider()
+
+Control how you unnest:
+
+```{r unnest-variants}
+# Sample data with vectors in list column
+sample_data <- tibble(
+  sample = c("S1", "S2", "S3"),
+  replicates = list(
+    c(10, 12, 11),
+    c(20, 22, 21),
+    c(30, 32, 31)
+  )
+)
+
+sample_data
+
+# Unnest to long format
+sample_data %>%
+  unnest_longer(replicates)
+
+# With indices
+sample_data %>%
+  unnest_longer(replicates, indices_to = "replicate_number")
+```
+
+## Practical Example: Multi-Omics Integration
+
+```{r multi-omics}
+# Simulate multi-omics data for samples
+samples <- tibble(
+  sample_id = paste0("Sample_", 1:5),
+
+  # RNA-seq data
+  rnaseq = map(1:5, ~{
+    tibble(
+      gene = paste0("Gene_", 1:10),
+      expression = rnorm(10, 100 + .x * 10, 20)
+    )
+  }),
+
+  # Proteomics data
+  proteomics = map(1:5, ~{
+    tibble(
+      protein = paste0("Protein_", 1:8),
+      abundance = rnorm(8, 50 + .x * 5, 10)
+    )
+  }),
+
+  # Metabolomics data
+  metabolomics = map(1:5, ~{
+    tibble(
+      metabolite = paste0("Metabolite_", 1:12),
+      concentration = rnorm(12, 25 + .x * 3, 5)
+    )
+  })
+)
+
+samples
+
+# Calculate summary for each omics layer
+omics_summary <- samples %>%
+  mutate(
+    rnaseq_mean = map_dbl(rnaseq, ~mean(.x$expression)),
+    protein_mean = map_dbl(proteomics, ~mean(.x$abundance)),
+    metabolite_mean = map_dbl(metabolomics, ~mean(.x$concentration))
+  )
+
+omics_summary %>%
+  select(sample_id, rnaseq_mean, protein_mean, metabolite_mean)
+```
+
+## Error Handling in Nested Workflows
+
+```{r error-handling-nested}
+# Some operations might fail
+risky_data <- tibble(
+  id = c("A", "B", "C", "D"),
+  values = list(
+    c(1, 2, 3, 4, 5),
+    c(2, 3, 4, 5, 6),
+    c(NA, NA, NA),      # Will cause problems
+    c(4, 5, 6, 7, 8)
+  )
+)
+
+# Use possibly() to handle errors
+safe_mean <- possibly(mean, otherwise = NA_real_)
+
+risky_data %>%
+  mutate(
+    mean_value = map_dbl(values, safe_mean),
+    has_na = map_lgl(values, ~any(is.na(.x)))
+  )
+```
+
+## When to Use Nested Data
+
+**Use nested data when:**
+- You have natural groupings with different numbers of observations
+- You want to fit models to each group
+- You're creating plots for each subset
+- You have hierarchical data structures
+- You want to keep related data together
+
+**Avoid when:**
+- Simple operations on flat data suffice
+- You're just getting started with tidyverse
+- Memory is very limited
+- You don't need the grouping structure
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Create nested data from the penguins dataset grouped by
+# species and sex, then calculate mean body mass for each group
+
+
+# Exercise 2: Fit a model predicting bill_length from bill_depth for
+# each island, extract R-squared values
+
+
+# Exercise 3: Create a nested data frame of growth curves (from earlier),
+# fit exponential growth models, extract growth rate parameters
+
+
+# Exercise 4: Create plots for each combination of species and island,
+# store them in a data frame, save them all to files
+
+
+# Exercise 5: Simulate data for 10 patients with 5 timepoints each,
+# nest by patient, calculate trajectory slopes
+
+
+```
+
+## Key Patterns Summary
+
+```{r patterns, eval=FALSE}
+# Pattern 1: Group, nest, map
+data %>%
+  group_by(group_var) %>%
+  nest() %>%
+  mutate(result = map(data, some_function))
+
+# Pattern 2: Nest, multiple operations
+data %>%
+  group_by(group_var) %>%
+  nest() %>%
+  mutate(
+    stat1 = map_dbl(data, func1),
+    stat2 = map(data, func2),
+    plot = map(data, make_plot)
+  )
+
+# Pattern 3: Nest, model, extract
+data %>%
+  group_by(group_var) %>%
+  nest() %>%
+  mutate(
+    model = map(data, ~lm(y ~ x, data = .x)),
+    tidy = map(model, broom::tidy),
+    glance = map(model, broom::glance)
+  ) %>%
+  unnest(glance)
+
+# Pattern 4: Multi-level operations
+data %>%
+  group_by(level1, level2) %>%
+  nest() %>%
+  group_by(level1) %>%
+  nest(inner = c(level2, data))
+```
+
+## Key Takeaways
+
+- Nested data keeps related information together
+- List columns can store any R object
+- `nest()` creates nested data, `unnest()` expands it
+- Combine nesting with `map()` for powerful workflows
+- Store models, plots, and complex results in data frames
+- Use `hoist()` to extract from nested lists
+- `broom` functions (`tidy()`, `glance()`) work great with nested models
+- Perfect for group-wise analyses and complex pipelines
+
+## Advanced tidyverse Complete!
+
+You've now mastered:
+- **Lesson 11**: purrr for functional programming
+- **Lesson 12**: stringr for text manipulation
+- **Lesson 13**: lubridate for dates and times
+- **Lesson 14**: Advanced tidyr for nested data
+
+These tools, combined with the core tidyverse skills from earlier lessons, give you everything needed for sophisticated biological data analysis!
+
+---
+
+**Final Project:**
+
+Combine all advanced tidyverse skills:
+
+1. Read multiple data files (purrr)
+2. Parse sample IDs and dates (stringr, lubridate)
+3. Calculate time intervals
+4. Nest by experimental groups
+5. Fit models to each group
+6. Extract and compare statistics
+7. Create publication-quality figure for each group
+8. Generate comprehensive analysis report
+
+Clean up:
+
+```{r cleanup, include=FALSE}
+# Remove created files
+file.remove(list.files(pattern = "penguin_.*\\.png"))
+```

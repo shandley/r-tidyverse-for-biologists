@@ -1,0 +1,723 @@
+---
+title: "Lesson 16: Linear Models and Generalized Linear Models"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Fit and interpret simple linear regression models
+2. Build multiple regression models with multiple predictors
+3. Assess model fit and diagnostics
+4. Compare competing models
+5. Use logistic regression for binary outcomes
+6. Apply Poisson regression for count data
+7. Make predictions from models
+8. Visualize model results effectively
+9. Work with models in a tidyverse workflow
+
+## Why Linear Models for Biology?
+
+Linear models are fundamental for:
+- **Dose-response relationships**: Drug concentration → effect
+- **Growth curves**: Time → cell count
+- **Gene expression**: Treatment → expression level
+- **Predictive models**: Multiple factors → outcome
+- **Binary outcomes**: Infected/not infected, survived/died
+- **Count data**: Number of colonies, mutation counts
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(broom)       # Tidy model outputs
+library(modelr)      # Helper functions for modeling
+library(palmerpenguins)
+
+set.seed(42)
+```
+
+## Simple Linear Regression
+
+Relationship between one predictor (x) and one outcome (y).
+
+### Basic Model
+
+```{r simple-regression}
+# Does flipper length predict body mass?
+penguins_clean <- penguins %>%
+  filter(!is.na(body_mass_g), !is.na(flipper_length_mm))
+
+# Fit model
+model1 <- lm(body_mass_g ~ flipper_length_mm, data = penguins_clean)
+
+# Traditional summary (messy)
+summary(model1)
+
+# Tidy output with broom
+tidy(model1)       # Coefficients
+glance(model1)     # Model statistics
+```
+
+### Interpreting Coefficients
+
+```{r interpret-coef}
+coef_table <- tidy(model1)
+coef_table
+
+# Intercept: Expected body mass when flipper = 0 (not meaningful here)
+# Slope: For each 1mm increase in flipper, body mass increases by ~50g
+```
+
+### Model Diagnostics
+
+```{r diagnostics-simple}
+# Get fitted values and residuals
+model1_aug <- augment(model1)
+head(model1_aug)
+
+# Diagnostic plots
+# 1. Residuals vs Fitted
+ggplot(model1_aug, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(se = FALSE) +
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# 2. Q-Q plot (normality of residuals)
+ggplot(model1_aug, aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot of Residuals") +
+  theme_minimal()
+
+# 3. Scale-Location (homoscedasticity)
+ggplot(model1_aug, aes(x = .fitted, y = sqrt(abs(.std.resid)))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(se = FALSE) +
+  labs(title = "Scale-Location Plot",
+       x = "Fitted Values",
+       y = "√|Standardized Residuals|") +
+  theme_minimal()
+```
+
+### Visualizing the Model
+
+```{r visualize-simple}
+# Add predictions to data
+penguins_with_pred <- penguins_clean %>%
+  add_predictions(model1, var = "predicted") %>%
+  add_residuals(model1, var = "residual")
+
+# Plot with regression line
+ggplot(penguins_with_pred, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(alpha = 0.5) +
+  geom_line(aes(y = predicted), color = "blue", size = 1.5) +
+  labs(title = "Linear Regression: Flipper Length → Body Mass",
+       subtitle = paste0("R² = ", round(glance(model1)$r.squared, 3)),
+       x = "Flipper Length (mm)",
+       y = "Body Mass (g)") +
+  theme_minimal()
+```
+
+## Multiple Regression
+
+Multiple predictors for one outcome.
+
+### Adding Variables
+
+```{r multiple-regression}
+# Model with flipper length AND bill length
+model2 <- lm(body_mass_g ~ flipper_length_mm + bill_length_mm,
+             data = penguins_clean)
+
+tidy(model2)
+glance(model2)
+
+# Compare to simple model
+bind_rows(
+  glance(model1) %>% mutate(model = "Flipper only"),
+  glance(model2) %>% mutate(model = "Flipper + Bill")
+) %>%
+  select(model, r.squared, adj.r.squared, AIC, p.value)
+```
+
+### Categorical Predictors
+
+```{r categorical-predictors}
+# Add species as a categorical predictor
+model3 <- lm(body_mass_g ~ flipper_length_mm + species,
+             data = penguins_clean)
+
+tidy(model3)
+
+# Interpretation:
+# - Baseline is Adelie (reference level)
+# - speciesChinstrap: Chinstraps are ~30g lighter than Adelie (same flipper length)
+# - speciesGentoo: Gentoos are ~1013g heavier than Adelie (same flipper length)
+```
+
+### Interaction Terms
+
+```{r interactions}
+# Does the relationship between flipper and mass differ by species?
+model4 <- lm(body_mass_g ~ flipper_length_mm * species,
+             data = penguins_clean)
+
+tidy(model4)
+
+# Visualize interaction
+ggplot(penguins_clean, aes(x = flipper_length_mm, y = body_mass_g,
+                           color = species)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(title = "Interaction: Flipper Length × Species",
+       x = "Flipper Length (mm)",
+       y = "Body Mass (g)",
+       color = "Species") +
+  theme_minimal()
+```
+
+## Model Selection
+
+### Comparing Models
+
+```{r model-comparison}
+# Compare all models
+model_comparison <- bind_rows(
+  glance(model1) %>% mutate(model = "Flipper"),
+  glance(model2) %>% mutate(model = "Flipper + Bill"),
+  glance(model3) %>% mutate(model = "Flipper + Species"),
+  glance(model4) %>% mutate(model = "Flipper × Species")
+) %>%
+  select(model, r.squared, adj.r.squared, AIC, BIC) %>%
+  arrange(AIC)
+
+model_comparison
+
+# Lower AIC = better model
+# model4 (interaction) wins!
+```
+
+### ANOVA for Nested Models
+
+```{r anova-comparison}
+# Test if adding species improves the model
+anova(model1, model3) %>%
+  tidy()
+
+# Test if interaction is necessary
+anova(model3, model4) %>%
+  tidy()
+```
+
+### Stepwise Selection
+
+```{r stepwise}
+# Start with full model
+full_model <- lm(body_mass_g ~ flipper_length_mm + bill_length_mm +
+                               bill_depth_mm + species,
+                 data = penguins_clean)
+
+# Backward elimination (be cautious - can overfit!)
+step_model <- step(full_model, direction = "backward", trace = 0)
+
+tidy(step_model)
+```
+
+## Making Predictions
+
+```{r predictions}
+# New data to predict
+new_penguins <- tibble(
+  flipper_length_mm = c(190, 200, 210),
+  species = c("Adelie", "Chinstrap", "Gentoo")
+)
+
+# Predict using model4
+predictions <- predict(model4, newdata = new_penguins,
+                      interval = "confidence") %>%
+  as_tibble() %>%
+  bind_cols(new_penguins)
+
+predictions
+
+# Visualize predictions
+ggplot(penguins_clean, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(aes(color = species), alpha = 0.3) +
+  geom_point(data = predictions, aes(y = fit), size = 4, shape = 17) +
+  geom_errorbar(data = predictions,
+                aes(y = fit, ymin = lwr, ymax = upr),
+                width = 2) +
+  facet_wrap(~species) +
+  labs(title = "Predictions with 95% Confidence Intervals",
+       x = "Flipper Length (mm)",
+       y = "Body Mass (g)") +
+  theme_minimal()
+```
+
+## Generalized Linear Models (GLMs)
+
+For non-normal outcomes!
+
+### Logistic Regression (Binary Outcomes)
+
+```{r logistic-regression}
+# Example: Predict sex based on measurements
+penguins_sex <- penguins %>%
+  filter(!is.na(sex), !is.na(bill_length_mm), !is.na(body_mass_g)) %>%
+  mutate(is_male = if_else(sex == "male", 1, 0))
+
+# Logistic regression
+logistic_model <- glm(is_male ~ body_mass_g + bill_length_mm,
+                      data = penguins_sex,
+                      family = binomial(link = "logit"))
+
+tidy(logistic_model)
+glance(logistic_model)
+
+# Odds ratios (exponentiate coefficients)
+tidy(logistic_model) %>%
+  mutate(
+    odds_ratio = exp(estimate),
+    OR_lower = exp(estimate - 1.96 * std.error),
+    OR_upper = exp(estimate + 1.96 * std.error)
+  ) %>%
+  select(term, odds_ratio, OR_lower, OR_upper, p.value)
+```
+
+### Interpreting Logistic Regression
+
+```{r interpret-logistic}
+# Get predicted probabilities
+penguins_with_prob <- penguins_sex %>%
+  add_predictions(logistic_model, var = "log_odds", type = "link") %>%
+  mutate(
+    probability_male = exp(log_odds) / (1 + exp(log_odds)),
+    predicted_sex = if_else(probability_male > 0.5, "male", "female")
+  )
+
+# Confusion matrix
+table(Actual = penguins_with_prob$sex,
+      Predicted = penguins_with_prob$predicted_sex)
+
+# Accuracy
+mean(penguins_with_prob$sex == penguins_with_prob$predicted_sex)
+```
+
+### Visualizing Logistic Regression
+
+```{r visualize-logistic}
+# Probability of being male vs body mass
+ggplot(penguins_with_prob, aes(x = body_mass_g, y = is_male)) +
+  geom_point(alpha = 0.3, position = position_jitter(height = 0.05)) +
+  geom_line(aes(y = probability_male), color = "blue", size = 1.5) +
+  labs(title = "Logistic Regression: Probability of Being Male",
+       x = "Body Mass (g)",
+       y = "P(Male)") +
+  theme_minimal()
+```
+
+### ROC Curve
+
+```{r roc-curve}
+library(pROC)
+
+# Calculate ROC
+roc_obj <- roc(penguins_with_prob$is_male,
+               penguins_with_prob$probability_male)
+
+# AUC
+auc(roc_obj)
+
+# Plot ROC curve
+roc_data <- tibble(
+  sensitivity = roc_obj$sensitivities,
+  specificity = roc_obj$specificities
+)
+
+ggplot(roc_data, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(size = 1.5, color = "steelblue") +
+  geom_abline(linetype = "dashed", color = "red") +
+  labs(title = paste("ROC Curve (AUC =", round(auc(roc_obj), 3), ")"),
+       x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)") +
+  theme_minimal()
+```
+
+## Poisson Regression (Count Data)
+
+```{r poisson-regression}
+# Simulate colony count data
+colony_data <- tibble(
+  concentration = rep(c(0, 0.1, 0.5, 1, 5), each = 10),
+  treatment = rep(c("control", "antibiotic"), times = 25),
+  colony_count = rpois(50, lambda = exp(3 - 0.5 * concentration +
+                       ifelse(treatment == "antibiotic", -1, 0)))
+)
+
+# Poisson regression
+poisson_model <- glm(colony_count ~ concentration + treatment,
+                     data = colony_data,
+                     family = poisson(link = "log"))
+
+tidy(poisson_model)
+glance(poisson_model)
+
+# Interpret coefficients on original scale
+tidy(poisson_model) %>%
+  mutate(
+    rate_ratio = exp(estimate),
+    RR_lower = exp(estimate - 1.96 * std.error),
+    RR_upper = exp(estimate + 1.96 * std.error)
+  ) %>%
+  select(term, rate_ratio, RR_lower, RR_upper, p.value)
+```
+
+### Checking for Overdispersion
+
+```{r overdispersion}
+# Check overdispersion (variance > mean)
+# Residual deviance should be close to residual df
+glance(poisson_model) %>%
+  mutate(
+    dispersion = deviance / df.residual,
+    overdispersed = dispersion > 1.5
+  ) %>%
+  select(deviance, df.residual, dispersion, overdispersed)
+
+# If overdispersed, use quasi-Poisson
+quasi_poisson_model <- glm(colony_count ~ concentration + treatment,
+                          data = colony_data,
+                          family = quasipoisson(link = "log"))
+
+tidy(quasi_poisson_model)
+```
+
+### Visualizing Poisson Model
+
+```{r visualize-poisson}
+# Add predictions
+colony_with_pred <- colony_data %>%
+  add_predictions(poisson_model, var = "log_count", type = "link") %>%
+  mutate(predicted_count = exp(log_count))
+
+ggplot(colony_with_pred, aes(x = concentration, y = colony_count,
+                             color = treatment)) +
+  geom_point(alpha = 0.5, position = position_jitter(width = 0.05)) +
+  geom_line(aes(y = predicted_count), size = 1.5) +
+  labs(title = "Poisson Regression: Colony Count vs Concentration",
+       x = "Antibiotic Concentration",
+       y = "Colony Count",
+       color = "Treatment") +
+  theme_minimal()
+```
+
+## Real-World Example: Dose-Response Curve
+
+```{r dose-response}
+# Drug dose-response experiment
+dose_response <- tibble(
+  dose_uM = rep(c(0, 0.1, 0.5, 1, 5, 10, 50), each = 4),
+  viability_pct = c(
+    rnorm(4, 100, 5),      # 0 µM
+    rnorm(4, 98, 5),       # 0.1 µM
+    rnorm(4, 85, 5),       # 0.5 µM
+    rnorm(4, 65, 8),       # 1 µM
+    rnorm(4, 35, 8),       # 5 µM
+    rnorm(4, 15, 5),       # 10 µM
+    rnorm(4, 5, 3)         # 50 µM
+  )
+)
+
+# Log-transform dose (avoid log(0))
+dose_response <- dose_response %>%
+  mutate(log_dose = log10(dose_uM + 0.01))
+
+# Fit model
+dose_model <- lm(viability_pct ~ log_dose, data = dose_response)
+
+tidy(dose_model)
+glance(dose_model)
+
+# Add predictions
+dose_with_pred <- dose_response %>%
+  add_predictions(dose_model) %>%
+  add_residuals(dose_model)
+
+# Plot
+ggplot(dose_with_pred, aes(x = log_dose, y = viability_pct)) +
+  geom_point(size = 2, alpha = 0.6) +
+  geom_line(aes(y = pred), color = "red", size = 1.5) +
+  labs(title = "Drug Dose-Response Curve",
+       x = "log10(Dose in µM)",
+       y = "Cell Viability (%)") +
+  theme_minimal()
+```
+
+### Calculate IC50
+
+```{r ic50}
+# IC50: dose that gives 50% viability
+# From model: viability = intercept + slope * log_dose
+# 50 = intercept + slope * log(IC50)
+# log(IC50) = (50 - intercept) / slope
+
+coeffs <- coef(dose_model)
+log_ic50 <- (50 - coeffs[1]) / coeffs[2]
+ic50 <- 10^log_ic50
+
+cat("IC50 =", round(ic50, 2), "µM\n")
+```
+
+## Polynomial Regression (Non-Linear Relationships)
+
+```{r polynomial}
+# Simulate growth curve
+growth_curve <- tibble(
+  time_hr = rep(seq(0, 24, by = 2), 3),
+  replicate = rep(1:3, each = 13),
+  od600 = 0.05 + (1.5 * (1 - exp(-0.2 * time_hr))) +
+          rnorm(39, 0, 0.05)
+)
+
+# Try linear model (won't fit well)
+linear_growth <- lm(od600 ~ time_hr, data = growth_curve)
+
+# Quadratic model
+quadratic_growth <- lm(od600 ~ time_hr + I(time_hr^2), data = growth_curve)
+
+# Cubic model
+cubic_growth <- lm(od600 ~ poly(time_hr, 3), data = growth_curve)
+
+# Compare
+bind_rows(
+  glance(linear_growth) %>% mutate(model = "Linear"),
+  glance(quadratic_growth) %>% mutate(model = "Quadratic"),
+  glance(cubic_growth) %>% mutate(model = "Cubic")
+) %>%
+  select(model, r.squared, adj.r.squared, AIC)
+
+# Plot comparison
+growth_predictions <- growth_curve %>%
+  add_predictions(linear_growth, var = "pred_linear") %>%
+  add_predictions(quadratic_growth, var = "pred_quadratic") %>%
+  add_predictions(cubic_growth, var = "pred_cubic")
+
+ggplot(growth_predictions, aes(x = time_hr, y = od600)) +
+  geom_point(alpha = 0.5) +
+  geom_line(aes(y = pred_linear, color = "Linear"), size = 1) +
+  geom_line(aes(y = pred_quadratic, color = "Quadratic"), size = 1) +
+  geom_line(aes(y = pred_cubic, color = "Cubic"), size = 1) +
+  scale_color_manual(values = c("Linear" = "red",
+                                "Quadratic" = "blue",
+                                "Cubic" = "green")) +
+  labs(title = "Growth Curve: Model Comparison",
+       x = "Time (hours)",
+       y = "OD600",
+       color = "Model") +
+  theme_minimal()
+```
+
+## Model Workflow with purrr
+
+```{r model-workflow}
+# Fit models to each species separately
+species_models <- penguins_clean %>%
+  group_by(species) %>%
+  nest() %>%
+  mutate(
+    # Fit model
+    model = map(data, ~lm(body_mass_g ~ flipper_length_mm, data = .x)),
+
+    # Extract statistics
+    tidy = map(model, tidy),
+    glance = map(model, glance),
+    augment = map(model, augment),
+
+    # Get R-squared
+    r_squared = map_dbl(glance, ~.x$r.squared)
+  )
+
+# View coefficients
+species_models %>%
+  select(species, tidy) %>%
+  unnest(tidy)
+
+# View model statistics
+species_models %>%
+  select(species, r_squared) %>%
+  arrange(desc(r_squared))
+
+# Create plots for each species
+species_plots <- species_models %>%
+  mutate(
+    plot = pmap(list(data, augment, species), function(d, a, s) {
+      ggplot(d, aes(x = flipper_length_mm, y = body_mass_g)) +
+        geom_point(alpha = 0.5) +
+        geom_line(data = a, aes(y = .fitted), color = "blue", size = 1.5) +
+        labs(title = paste("Species:", s),
+             x = "Flipper Length (mm)",
+             y = "Body Mass (g)") +
+        theme_minimal()
+    })
+  )
+
+# View a plot
+species_plots$plot[[1]]
+```
+
+## Model Diagnostics Checklist
+
+```{r diagnostic-function}
+# Create function to check all diagnostics
+check_model <- function(model) {
+  aug <- augment(model)
+
+  p1 <- ggplot(aug, aes(x = .fitted, y = .resid)) +
+    geom_point(alpha = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    geom_smooth(se = FALSE) +
+    labs(title = "Residuals vs Fitted", x = "Fitted", y = "Residuals") +
+    theme_minimal()
+
+  p2 <- ggplot(aug, aes(sample = .resid)) +
+    stat_qq() +
+    stat_qq_line(color = "red") +
+    labs(title = "Q-Q Plot") +
+    theme_minimal()
+
+  p3 <- ggplot(aug, aes(x = .fitted, y = sqrt(abs(.std.resid)))) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(se = FALSE) +
+    labs(title = "Scale-Location",
+         x = "Fitted",
+         y = "√|Std Residuals|") +
+    theme_minimal()
+
+  p4 <- ggplot(aug, aes(x = .hat, y = .std.resid)) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(se = FALSE) +
+    labs(title = "Residuals vs Leverage",
+         x = "Leverage",
+         y = "Std Residuals") +
+    theme_minimal()
+
+  library(patchwork)
+  (p1 | p2) / (p3 | p4)
+}
+
+# Use it
+check_model(model4)
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Build a model predicting bill_length_mm from bill_depth_mm
+# and island. Which island has the longest bills (controlling for depth)?
+
+
+# Exercise 2: Create logistic regression to predict species (Adelie vs not)
+# based on body measurements. What's the accuracy?
+
+
+# Exercise 3: Simulate count data for a CRISPR screen (mutations vs gRNA concentration)
+# Fit Poisson model and check for overdispersion
+
+
+# Exercise 4: For each combination of species and island, fit a model
+# predicting body mass from flipper length. Which has the strongest relationship?
+
+
+# Exercise 5: Create a dose-response dataset, fit polynomial models
+# (degree 1-4), and determine which degree fits best without overfitting
+
+
+```
+
+## Summary: When to Use Each Model
+
+```{r model-types-table, echo=FALSE}
+tibble(
+  `Outcome Type` = c(
+    "Continuous (normal)",
+    "Binary (yes/no)",
+    "Count (0,1,2,...)",
+    "Count (overdispersed)",
+    "Proportion (0-1)",
+    "Time-to-event"
+  ),
+  Model = c(
+    "Linear regression (lm)",
+    "Logistic regression (glm, family=binomial)",
+    "Poisson regression (glm, family=poisson)",
+    "Quasi-Poisson or Negative binomial",
+    "Beta regression or logistic",
+    "Survival models (next lesson!)"
+  ),
+  Example = c(
+    "Gene expression, body mass",
+    "Infected/not, survived/died",
+    "Colony count, mutation count",
+    "RNA-seq read counts",
+    "Percent methylation",
+    "Time to disease onset"
+  )
+) %>%
+  knitr::kable()
+```
+
+## Key Takeaways
+
+- **Linear models** are fundamental for continuous outcomes
+- **Multiple regression** handles multiple predictors
+- **broom** package makes model outputs tidy and pipe-friendly
+- **Always check diagnostics** before trusting results
+- **GLMs** extend linear models to other outcome types
+- **Logistic regression** for binary outcomes (odds ratios)
+- **Poisson regression** for count data (check overdispersion!)
+- **Model comparison** uses AIC, BIC, or ANOVA
+- **Predictions** should include confidence/prediction intervals
+- **Interactions** test if effects differ across groups
+
+## Common Mistakes
+
+1. **Not checking assumptions** → Invalid inference
+2. **Overfitting** → Too many predictors for sample size
+3. **Multicollinearity** → Highly correlated predictors
+4. **Extrapolation** → Predicting outside data range
+5. **P-value fishing** → Testing many models until one is significant
+6. **Ignoring overdispersion** in count models
+7. **Treating counts as continuous** → Use Poisson/negative binomial
+8. **Not considering non-linear relationships**
+
+## Next Steps
+
+You now have the tools to:
+- Model relationships in your data
+- Make predictions
+- Choose appropriate models for different outcomes
+- Assess model quality
+- Work with models in tidyverse workflows
+
+---
+
+**Homework:**
+
+1. Choose a dataset with a continuous outcome
+2. Build 3 competing models with different predictors
+3. Check diagnostic plots for all models
+4. Compare models with AIC and ANOVA
+5. Make predictions with the best model
+6. Visualize the model fit
+7. Write an interpretation of the results

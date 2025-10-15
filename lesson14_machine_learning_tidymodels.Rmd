@@ -1,0 +1,763 @@
+---
+title: "Lesson 17: Machine Learning with tidymodels"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Split data into training and testing sets
+2. Preprocess data with recipes
+3. Specify and train machine learning models
+4. Use cross-validation for model evaluation
+5. Tune hyperparameters systematically
+6. Compare model performance
+7. Make predictions on new data
+8. Identify important features
+9. Apply ML to biological classification and regression problems
+
+## Why tidymodels for Biology?
+
+Machine learning is increasingly important for:
+- **Classification**: Disease status, cell type identification
+- **Prediction**: Drug response, protein function
+- **Feature selection**: Which genes/proteins matter most?
+- **Pattern discovery**: Clustering patient subtypes
+- **High-dimensional data**: Genomics, proteomics, imaging
+
+tidymodels provides a consistent, tidyverse-compatible framework!
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(tidymodels)  # Meta-package: includes parsnip, recipes, rsample, etc.
+library(ranger)      # Random forest engine
+library(glmnet)      # Regularized regression
+library(vip)         # Variable importance plots
+
+set.seed(123)
+```
+
+## The tidymodels Framework
+
+```{r tidymodels-overview, eval=FALSE}
+# tidymodels includes:
+# - rsample:   Data splitting and resampling
+# - recipes:   Feature engineering and preprocessing
+# - parsnip:   Model specification
+# - workflows: Combine recipes and models
+# - tune:      Hyperparameter tuning
+# - yardstick: Model evaluation metrics
+# - broom:     Tidy model outputs
+```
+
+## Example Dataset: Predicting Disease Status
+
+```{r create-data}
+# Simulate biomarker data for disease classification
+disease_data <- tibble(
+  patient_id = paste0("P", str_pad(1:300, 3, pad = "0")),
+  # Biomarkers
+  biomarker_1 = rnorm(300, 100, 20),
+  biomarker_2 = rnorm(300, 50, 10),
+  biomarker_3 = rnorm(300, 75, 15),
+  biomarker_4 = rnorm(300, 30, 8),
+  age = sample(25:80, 300, replace = TRUE),
+  sex = sample(c("M", "F"), 300, replace = TRUE)
+) %>%
+  mutate(
+    # Disease status based on biomarkers (with some noise)
+    disease_score = 0.5 * biomarker_1 + 0.3 * biomarker_2 -
+                    0.2 * biomarker_3 + rnorm(300, 0, 10),
+    disease = if_else(disease_score > 60, "diseased", "healthy"),
+    disease = factor(disease, levels = c("healthy", "diseased"))
+  ) %>%
+  select(-disease_score)
+
+# Overview
+disease_data %>%
+  count(disease)
+
+glimpse(disease_data)
+```
+
+## Step 1: Train/Test Split
+
+```{r train-test-split}
+# Split data: 75% training, 25% testing
+set.seed(123)
+data_split <- initial_split(disease_data, prop = 0.75, strata = disease)
+
+# Extract training and testing sets
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+# Check distribution
+train_data %>% count(disease)
+test_data %>% count(disease)
+```
+
+## Step 2: Feature Engineering with Recipes
+
+```{r recipe}
+# Create preprocessing recipe
+disease_recipe <- recipe(disease ~ ., data = train_data) %>%
+  # Remove ID column
+  update_role(patient_id, new_role = "ID") %>%
+
+  # Normalize numeric predictors
+  step_normalize(all_numeric_predictors()) %>%
+
+  # Convert categorical to dummy variables
+  step_dummy(all_nominal_predictors()) %>%
+
+  # Remove zero-variance predictors
+  step_zv(all_predictors())
+
+disease_recipe
+
+# Prepare the recipe (estimate parameters from training data)
+disease_prep <- prep(disease_recipe)
+
+# Apply to training data
+train_processed <- bake(disease_prep, new_data = NULL)
+head(train_processed)
+
+# Apply to test data
+test_processed <- bake(disease_prep, new_data = test_data)
+```
+
+## Step 3: Model Specification
+
+### Logistic Regression
+
+```{r logistic-spec}
+# Specify logistic regression model
+logistic_spec <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+logistic_spec
+```
+
+### Random Forest
+
+```{r rf-spec}
+# Specify random forest
+rf_spec <- rand_forest(trees = 500) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+rf_spec
+```
+
+## Step 4: Workflows
+
+Combine recipe and model:
+
+```{r workflow}
+# Logistic regression workflow
+logistic_wf <- workflow() %>%
+  add_recipe(disease_recipe) %>%
+  add_model(logistic_spec)
+
+# Random forest workflow
+rf_wf <- workflow() %>%
+  add_recipe(disease_recipe) %>%
+  add_model(rf_spec)
+```
+
+## Step 5: Train Models
+
+```{r train-models}
+# Train logistic regression
+logistic_fit <- logistic_wf %>%
+  fit(data = train_data)
+
+# Train random forest
+rf_fit <- rf_wf %>%
+  fit(data = train_data)
+```
+
+## Step 6: Make Predictions
+
+```{r predictions}
+# Predict on test data
+logistic_pred <- predict(logistic_fit, test_data) %>%
+  bind_cols(predict(logistic_fit, test_data, type = "prob")) %>%
+  bind_cols(test_data %>% select(disease))
+
+rf_pred <- predict(rf_fit, test_data) %>%
+  bind_cols(predict(rf_fit, test_data, type = "prob")) %>%
+  bind_cols(test_data %>% select(disease))
+
+head(logistic_pred)
+```
+
+## Step 7: Evaluate Models
+
+```{r evaluate}
+# Accuracy
+logistic_acc <- accuracy(logistic_pred, truth = disease, estimate = .pred_class)
+rf_acc <- accuracy(rf_pred, truth = disease, estimate = .pred_class)
+
+# Combine metrics
+metrics <- bind_rows(
+  logistic_acc %>% mutate(model = "Logistic Regression"),
+  rf_acc %>% mutate(model = "Random Forest")
+)
+
+metrics
+
+# Multiple metrics at once
+logistic_metrics <- logistic_pred %>%
+  metrics(truth = disease, estimate = .pred_class, .pred_diseased)
+
+rf_metrics <- rf_pred %>%
+  metrics(truth = disease, estimate = .pred_class, .pred_diseased)
+
+bind_rows(
+  logistic_metrics %>% mutate(model = "Logistic"),
+  rf_metrics %>% mutate(model = "Random Forest")
+)
+```
+
+### Confusion Matrix
+
+```{r confusion-matrix}
+# Logistic regression
+conf_mat(logistic_pred, truth = disease, estimate = .pred_class)
+
+# Random forest
+conf_mat(rf_pred, truth = disease, estimate = .pred_class)
+
+# Visualize
+conf_mat(rf_pred, truth = disease, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+### ROC Curves
+
+```{r roc-curves}
+# Calculate ROC curves
+logistic_roc <- logistic_pred %>%
+  roc_curve(truth = disease, .pred_diseased)
+
+rf_roc <- rf_pred %>%
+  roc_curve(truth = disease, .pred_diseased)
+
+# Plot
+bind_rows(
+  logistic_roc %>% mutate(model = "Logistic"),
+  rf_roc %>% mutate(model = "Random Forest")
+) %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = model)) +
+  geom_line(size = 1.5) +
+  geom_abline(linetype = "dashed") +
+  labs(title = "ROC Curves",
+       x = "1 - Specificity (FPR)",
+       y = "Sensitivity (TPR)",
+       color = "Model") +
+  theme_minimal()
+
+# AUC
+logistic_auc <- roc_auc(logistic_pred, truth = disease, .pred_diseased)
+rf_auc <- roc_auc(rf_pred, truth = disease, .pred_diseased)
+
+bind_rows(
+  logistic_auc %>% mutate(model = "Logistic"),
+  rf_auc %>% mutate(model = "Random Forest")
+)
+```
+
+## Cross-Validation
+
+More robust evaluation using resampling:
+
+```{r cross-validation}
+# Create 10-fold cross-validation
+set.seed(123)
+cv_folds <- vfold_cv(train_data, v = 10, strata = disease)
+
+cv_folds
+
+# Fit models to each fold
+logistic_cv <- logistic_wf %>%
+  fit_resamples(
+    resamples = cv_folds,
+    metrics = metric_set(accuracy, roc_auc, sens, spec)
+  )
+
+rf_cv <- rf_wf %>%
+  fit_resamples(
+    resamples = cv_folds,
+    metrics = metric_set(accuracy, roc_auc, sens, spec)
+  )
+
+# Collect metrics
+collect_metrics(logistic_cv)
+collect_metrics(rf_cv)
+
+# Compare
+bind_rows(
+  collect_metrics(logistic_cv) %>% mutate(model = "Logistic"),
+  collect_metrics(rf_cv) %>% mutate(model = "Random Forest")
+) %>%
+  ggplot(aes(x = model, y = mean, fill = model)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean - std_err, ymax = mean + std_err),
+                width = 0.2) +
+  facet_wrap(~.metric, scales = "free_y") +
+  labs(title = "Cross-Validation Performance",
+       y = "Mean ± SE") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Hyperparameter Tuning
+
+Optimize model parameters:
+
+```{r tuning}
+# Specify model with tunable parameters
+rf_tune_spec <- rand_forest(
+  mtry = tune(),      # Number of predictors to sample
+  trees = 500,
+  min_n = tune()      # Minimum node size
+) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+# Create workflow
+rf_tune_wf <- workflow() %>%
+  add_recipe(disease_recipe) %>%
+  add_model(rf_tune_spec)
+
+# Create tuning grid
+rf_grid <- grid_regular(
+  mtry(range = c(2, 6)),
+  min_n(range = c(2, 10)),
+  levels = 5
+)
+
+rf_grid
+
+# Tune model
+set.seed(123)
+rf_tune_results <- rf_tune_wf %>%
+  tune_grid(
+    resamples = cv_folds,
+    grid = rf_grid,
+    metrics = metric_set(roc_auc, accuracy)
+  )
+
+# View results
+collect_metrics(rf_tune_results)
+
+# Visualize tuning results
+autoplot(rf_tune_results)
+
+# Best parameters
+show_best(rf_tune_results, metric = "roc_auc")
+
+# Select best model
+best_rf <- select_best(rf_tune_results, metric = "roc_auc")
+best_rf
+```
+
+### Finalize and Fit Best Model
+
+```{r finalize-model}
+# Update workflow with best parameters
+final_rf_wf <- rf_tune_wf %>%
+  finalize_workflow(best_rf)
+
+# Fit on full training data
+final_rf_fit <- final_rf_wf %>%
+  fit(data = train_data)
+
+# Evaluate on test data
+final_pred <- predict(final_rf_fit, test_data) %>%
+  bind_cols(predict(final_rf_fit, test_data, type = "prob")) %>%
+  bind_cols(test_data %>% select(disease))
+
+# Metrics
+final_pred %>%
+  metrics(truth = disease, estimate = .pred_class, .pred_diseased)
+```
+
+## Feature Importance
+
+Which predictors matter most?
+
+```{r variable-importance}
+# Extract fitted model
+final_rf_model <- final_rf_fit %>%
+  extract_fit_parsnip()
+
+# Variable importance plot
+vip(final_rf_model, num_features = 10)
+
+# As tibble
+vip_data <- final_rf_model %>%
+  vip::vi() %>%
+  arrange(desc(Importance))
+
+vip_data
+
+# Custom plot
+ggplot(vip_data, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Feature Importance",
+       x = "Variable",
+       y = "Importance") +
+  theme_minimal()
+```
+
+## Regression Example: Predicting Gene Expression
+
+```{r regression-example}
+# Simulate gene expression data
+expression_data <- tibble(
+  sample_id = paste0("S", 1:200),
+  gene_1 = rnorm(200, 100, 30),
+  gene_2 = rnorm(200, 150, 40),
+  gene_3 = rnorm(200, 75, 25),
+  gene_4 = rnorm(200, 200, 50),
+  treatment_dose = runif(200, 0, 10)
+) %>%
+  mutate(
+    # Target gene expression depends on other genes
+    target_gene = 50 + 0.5 * gene_1 + 0.3 * gene_2 -
+                  0.2 * gene_3 + 0.1 * treatment_dose +
+                  rnorm(200, 0, 10)
+  )
+
+# Split data
+set.seed(123)
+expr_split <- initial_split(expression_data, prop = 0.75)
+expr_train <- training(expr_split)
+expr_test <- testing(expr_split)
+
+# Recipe
+expr_recipe <- recipe(target_gene ~ ., data = expr_train) %>%
+  update_role(sample_id, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+# Model specs
+lm_spec <- linear_reg() %>%
+  set_engine("lm")
+
+rf_reg_spec <- rand_forest(trees = 500) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+# Workflows
+lm_wf <- workflow() %>%
+  add_recipe(expr_recipe) %>%
+  add_model(lm_spec)
+
+rf_reg_wf <- workflow() %>%
+  add_recipe(expr_recipe) %>%
+  add_model(rf_reg_spec)
+
+# Fit models
+lm_fit <- lm_wf %>% fit(expr_train)
+rf_reg_fit <- rf_reg_wf %>% fit(expr_train)
+
+# Predictions
+lm_pred <- predict(lm_fit, expr_test) %>%
+  bind_cols(expr_test %>% select(target_gene))
+
+rf_reg_pred <- predict(rf_reg_fit, expr_test) %>%
+  bind_cols(expr_test %>% select(target_gene))
+
+# Metrics for regression
+metrics_reg <- metric_set(rmse, rsq, mae)
+
+bind_rows(
+  metrics_reg(lm_pred, truth = target_gene, estimate = .pred) %>%
+    mutate(model = "Linear Regression"),
+  metrics_reg(rf_reg_pred, truth = target_gene, estimate = .pred) %>%
+    mutate(model = "Random Forest")
+)
+
+# Visualize predictions
+bind_rows(
+  lm_pred %>% mutate(model = "Linear Regression"),
+  rf_reg_pred %>% mutate(model = "Random Forest")
+) %>%
+  ggplot(aes(x = target_gene, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  facet_wrap(~model) +
+  labs(title = "Predicted vs Actual Gene Expression",
+       x = "Actual Expression",
+       y = "Predicted Expression") +
+  theme_minimal()
+```
+
+## Regularized Regression (LASSO)
+
+Feature selection for high-dimensional data:
+
+```{r lasso}
+# LASSO model (L1 regularization)
+lasso_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+# Workflow
+lasso_wf <- workflow() %>%
+  add_recipe(expr_recipe) %>%
+  add_model(lasso_spec)
+
+# Create CV folds
+set.seed(123)
+expr_folds <- vfold_cv(expr_train, v = 5)
+
+# Tune penalty parameter
+lambda_grid <- grid_regular(penalty(range = c(-3, 0)), levels = 50)
+
+lasso_tune <- lasso_wf %>%
+  tune_grid(
+    resamples = expr_folds,
+    grid = lambda_grid,
+    metrics = metric_set(rmse, rsq)
+  )
+
+# Best penalty
+autoplot(lasso_tune)
+
+best_penalty <- select_best(lasso_tune, metric = "rmse")
+best_penalty
+
+# Finalize and fit
+final_lasso <- lasso_wf %>%
+  finalize_workflow(best_penalty) %>%
+  fit(expr_train)
+
+# Extract coefficients
+final_lasso %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  filter(estimate != 0)  # Non-zero coefficients
+```
+
+## Complete ML Pipeline Function
+
+```{r ml-pipeline}
+# Reusable ML pipeline
+run_ml_classification <- function(data, outcome, predictors, model_type = "rf") {
+
+  # Formula
+  formula <- as.formula(paste(outcome, "~ ."))
+
+  # Split
+  data_split <- initial_split(data, prop = 0.75, strata = all_of(outcome))
+  train <- training(data_split)
+  test <- testing(data_split)
+
+  # Recipe
+  rec <- recipe(formula, data = train) %>%
+    step_normalize(all_numeric_predictors()) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_zv(all_predictors())
+
+  # Model
+  if (model_type == "rf") {
+    mod <- rand_forest(trees = 500) %>%
+      set_engine("ranger") %>%
+      set_mode("classification")
+  } else {
+    mod <- logistic_reg() %>%
+      set_engine("glm") %>%
+      set_mode("classification")
+  }
+
+  # Workflow
+  wf <- workflow() %>%
+    add_recipe(rec) %>%
+    add_model(mod)
+
+  # Fit
+  fit <- wf %>% fit(train)
+
+  # Predict
+  pred <- predict(fit, test) %>%
+    bind_cols(predict(fit, test, type = "prob")) %>%
+    bind_cols(test %>% select(all_of(outcome)))
+
+  # Metrics
+  mets <- pred %>%
+    metrics(truth = !!sym(outcome),
+            estimate = .pred_class,
+            !!sym(paste0(".pred_", levels(data[[outcome]])[2])))
+
+  list(
+    workflow = wf,
+    fit = fit,
+    predictions = pred,
+    metrics = mets
+  )
+}
+
+# Use the pipeline
+results <- run_ml_classification(disease_data, "disease",
+                                  c("biomarker_1", "biomarker_2",
+                                    "biomarker_3", "biomarker_4", "age", "sex"))
+
+results$metrics
+```
+
+## Multi-Class Classification
+
+```{r multi-class}
+# Simulate data with 3 classes
+library(palmerpenguins)
+
+penguins_ml <- penguins %>%
+  filter(!is.na(sex), !is.na(body_mass_g)) %>%
+  select(species, bill_length_mm, bill_depth_mm,
+         flipper_length_mm, body_mass_g, sex)
+
+# Split
+set.seed(123)
+peng_split <- initial_split(penguins_ml, prop = 0.75, strata = species)
+peng_train <- training(peng_split)
+peng_test <- testing(peng_split)
+
+# Recipe
+peng_recipe <- recipe(species ~ ., data = peng_train) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors())
+
+# Random forest for multi-class
+peng_rf_spec <- rand_forest(trees = 500) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+# Workflow and fit
+peng_wf <- workflow() %>%
+  add_recipe(peng_recipe) %>%
+  add_model(peng_rf_spec)
+
+peng_fit <- peng_wf %>% fit(peng_train)
+
+# Predictions
+peng_pred <- predict(peng_fit, peng_test) %>%
+  bind_cols(predict(peng_fit, peng_test, type = "prob")) %>%
+  bind_cols(peng_test %>% select(species))
+
+# Multi-class metrics
+peng_pred %>%
+  metrics(truth = species, estimate = .pred_class)
+
+# Confusion matrix
+conf_mat(peng_pred, truth = species, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Build a random forest model to predict penguin sex
+# from body measurements. What's the accuracy? Which features matter most?
+
+
+# Exercise 2: Create a regression model to predict bill length from
+# other measurements. Compare linear regression vs random forest.
+
+
+# Exercise 3: Tune hyperparameters for a random forest predicting disease
+# status. Try different values of mtry and min_n.
+
+
+# Exercise 4: Build a LASSO model for feature selection on high-dimensional
+# data. Which features have non-zero coefficients?
+
+
+# Exercise 5: Create a complete ML pipeline that:
+# - Splits data
+# - Preprocesses with a recipe
+# - Tunes hyperparameters
+# - Evaluates on test set
+# - Returns feature importance
+
+
+```
+
+## Model Comparison Summary
+
+```{r comparison-table, echo=FALSE}
+tibble(
+  Model = c("Logistic Regression", "Random Forest", "LASSO",
+            "Linear Regression", "Poisson Regression"),
+  `Use Case` = c("Binary classification", "Classification/Regression",
+                 "High-dimensional feature selection",
+                 "Continuous outcome", "Count outcome"),
+  Pros = c("Interpretable, fast", "Handles interactions, non-linear",
+           "Feature selection, prevents overfitting",
+           "Simple, interpretable", "Appropriate for counts"),
+  Cons = c("Assumes linear relationship", "Black box, slower",
+           "Requires tuning", "Assumes linearity", "Requires appropriate distribution")
+) %>%
+  knitr::kable()
+```
+
+## Key Takeaways
+
+- **tidymodels** provides consistent interface for ML in R
+- **rsample** for splitting and resampling
+- **recipes** for preprocessing and feature engineering
+- **parsnip** for model specification
+- **workflows** combine recipes and models
+- **tune** for hyperparameter optimization
+- **yardstick** for evaluation metrics
+- Always split data BEFORE any processing
+- Use cross-validation for robust evaluation
+- Tune hyperparameters systematically
+- Check multiple metrics, not just accuracy
+- Feature importance reveals what drives predictions
+- Different models for different problem types
+
+## Best Practices
+
+1. **Always split first** - prevent data leakage
+2. **Stratify splits** - maintain class balance
+3. **Use CV** - more robust than single train/test
+4. **Tune hyperparameters** - don't use defaults blindly
+5. **Multiple metrics** - accuracy isn't everything
+6. **Feature importance** - understand your model
+7. **Test on held-out data** - final evaluation
+8. **Document preprocessing** - recipes are reproducible
+
+## Next Steps
+
+You can now:
+- Build predictive models for biological data
+- Evaluate model performance properly
+- Tune models for optimal performance
+- Select important features
+- Apply ML to classification and regression problems
+- Use tidymodels framework for reproducible ML
+
+---
+
+**Homework:**
+
+1. Choose a biological dataset with a categorical outcome
+2. Build 3 different models (logistic, random forest, etc.)
+3. Use cross-validation to compare them
+4. Tune the best model's hyperparameters
+5. Evaluate on test set
+6. Create feature importance plot
+7. Write interpretation: Which features predict the outcome? How well does the model perform?

@@ -1,0 +1,782 @@
+---
+title: "Lesson 18: Reproducible Research"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+params:
+  species: "Adelie"
+  min_sample_size: 30
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Create and use R Projects for organization
+2. Structure your analysis directories effectively
+3. Use the here package for robust file paths
+4. Manage package dependencies with renv
+5. Create parameterized RMarkdown reports
+6. Use RMarkdown templates
+7. Document your analysis environment
+8. Apply reproducibility best practices
+9. Share your work effectively
+
+## Why Reproducibility Matters
+
+Reproducibility in science means:
+- **You** can re-run your analysis in 6 months
+- **Collaborators** can understand and extend your work
+- **Reviewers** can verify your results
+- **The field** can build on your findings
+
+### The Reproducibility Crisis
+
+Common problems:
+- "It works on my machine"
+- Lost code or data
+- Unclear analysis steps
+- Different package versions
+- Hard-coded file paths
+- Manual data manipulation
+
+**We can fix all of these!**
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(here)          # Robust file paths
+# library(renv)        # Package management (we'll discuss)
+library(palmerpenguins)
+```
+
+## R Projects: Your Foundation
+
+### What is an R Project?
+
+An `.Rproj` file that:
+- Sets working directory automatically
+- Keeps work isolated
+- Makes paths relative
+- Integrates with version control
+
+### Creating a Project
+
+**In RStudio:**
+1. File → New Project
+2. Choose: New Directory / Existing Directory / Version Control
+3. Name your project (e.g., "RNA-seq-analysis")
+4. Create Project
+
+**What this does:**
+- Creates `project-name.Rproj` file
+- Sets working directory to project root
+- Isolates your R session
+
+### Project Benefits
+
+```{r project-benefits, eval=FALSE}
+# Without project:
+setwd("/Users/jane/Documents/Research/Project1/Analysis")
+data <- read_csv("/Users/jane/Documents/Research/Project1/Data/samples.csv")
+# Breaks on different computer!
+
+# With project:
+data <- read_csv("data/samples.csv")
+# Works anywhere! (as long as structure is maintained)
+```
+
+### Project Settings
+
+**Recommended settings** (Tools → Project Options):
+
+- **Restore .RData:** No (start fresh each time)
+- **Save workspace:** No (explicit saving only)
+- **Always save history:** Your choice
+
+Why? Fresh starts prevent hidden dependencies!
+
+## Directory Structure
+
+### Best Practice Structure
+
+```
+my-analysis/
+├── my-analysis.Rproj
+├── README.md                 # Project description
+├── data/
+│   ├── raw/                  # Original, never modified
+│   │   └── samples.csv
+│   └── processed/            # Cleaned data
+│       └── samples_clean.csv
+├── scripts/
+│   ├── 01_data_cleaning.R
+│   ├── 02_analysis.R
+│   └── 03_visualization.R
+├── reports/
+│   ├── analysis_report.Rmd
+│   └── analysis_report.html
+├── figures/
+│   ├── figure1.png
+│   └── figure2.png
+├── results/
+│   ├── model_output.csv
+│   └── statistics.txt
+├── functions/
+│   └── custom_functions.R
+└── renv/                     # Package management
+    └── renv.lock
+```
+
+### Creating Directory Structure
+
+```{r create-structure, eval=FALSE}
+# Create all directories at once
+dir.create("data/raw", recursive = TRUE)
+dir.create("data/processed", recursive = TRUE)
+dir.create("scripts")
+dir.create("reports")
+dir.create("figures")
+dir.create("results")
+dir.create("functions")
+```
+
+## The here Package
+
+Solves the "working directory" problem!
+
+### The Problem
+
+```{r path-problem, eval=FALSE}
+# Different working directories cause issues
+getwd()  # Where am I?
+
+# These might fail:
+read_csv("data/samples.csv")           # If not in project root
+read_csv("../data/samples.csv")        # Fragile
+read_csv("~/Research/Project/data/samples.csv")  # Not portable
+```
+
+### The Solution: here()
+
+```{r here-solution}
+library(here)
+
+# Where is project root?
+here()
+
+# Build paths relative to project root
+here("data", "raw", "samples.csv")
+here("figures", "plot1.png")
+here("scripts", "analysis.R")
+
+# Works from anywhere in project!
+```
+
+### Using here() in Practice
+
+```{r here-practice, eval=FALSE}
+# Reading data
+samples <- read_csv(here("data", "raw", "samples.csv"))
+
+# Saving results
+write_csv(results, here("results", "summary_stats.csv"))
+
+# Saving figures
+ggsave(here("figures", "growth_curve.png"), plot = p, width = 8, height = 6)
+
+# Sourcing scripts
+source(here("functions", "custom_functions.R"))
+```
+
+### Example: Complete Analysis Script
+
+```{r complete-script, eval=FALSE}
+# analysis.R - Always works from project root!
+
+library(tidyverse)
+library(here)
+
+# Read data
+raw_data <- read_csv(here("data", "raw", "expression_data.csv"))
+
+# Process
+clean_data <- raw_data %>%
+  filter(!is.na(expression)) %>%
+  mutate(log_expression = log2(expression + 1))
+
+# Save processed data
+write_csv(clean_data, here("data", "processed", "expression_clean.csv"))
+
+# Analyze
+results <- clean_data %>%
+  group_by(gene) %>%
+  summarise(mean_expr = mean(log_expression))
+
+# Save results
+write_csv(results, here("results", "gene_summary.csv"))
+
+# Plot
+p <- ggplot(results, aes(x = mean_expr)) +
+  geom_histogram()
+
+ggsave(here("figures", "expression_distribution.png"), p)
+```
+
+## Package Management with renv
+
+### The Problem
+
+```{r package-problem, eval=FALSE}
+# Your code today:
+library(dplyr)  # version 1.1.0
+
+# Your code in 6 months (dplyr updated to 2.0.0):
+library(dplyr)  # version 2.0.0 - breaking changes!
+# Code breaks! 😱
+```
+
+### The Solution: renv
+
+renv creates a **project-local** package library.
+
+```{r renv-init, eval=FALSE}
+# Install renv (once)
+install.packages("renv")
+
+# Initialize in your project
+renv::init()
+
+# What this does:
+# - Creates renv/ directory
+# - Creates renv.lock file (package versions)
+# - Creates .Rprofile (activates renv on startup)
+```
+
+### Basic renv Workflow
+
+```{r renv-workflow, eval=FALSE}
+# 1. Start project
+renv::activate()
+
+# 2. Install packages (creates project library)
+install.packages("tidyverse")
+install.packages("ggplot2")
+
+# 3. Work on your analysis...
+
+# 4. Snapshot package versions
+renv::snapshot()
+# Creates/updates renv.lock with exact versions
+
+# 5. Share project (including renv.lock)
+# Collaborator runs:
+renv::restore()
+# Installs exact same package versions!
+```
+
+### Checking Package Status
+
+```{r renv-status, eval=FALSE}
+# See what's out of sync
+renv::status()
+
+# Update a package
+install.packages("dplyr")
+renv::snapshot()  # Record new version
+
+# Remove unused packages
+renv::clean()
+```
+
+### renv.lock File
+
+```json
+{
+  "R": {
+    "Version": "4.3.0"
+  },
+  "Packages": {
+    "dplyr": {
+      "Package": "dplyr",
+      "Version": "1.1.0",
+      "Source": "Repository",
+      "Repository": "CRAN"
+    }
+  }
+}
+```
+
+This file ensures **exact reproducibility**!
+
+## Parameterized Reports
+
+Make reports flexible and reusable!
+
+### Adding Parameters
+
+In YAML header (top of this document):
+
+```yaml
+---
+title: "Analysis Report"
+params:
+  species: "Adelie"
+  min_sample_size: 30
+---
+```
+
+### Using Parameters
+
+```{r use-params}
+# Access with params$
+species_to_analyze <- params$species
+min_n <- params$min_sample_size
+
+cat("Analyzing species:", species_to_analyze, "\n")
+cat("Minimum sample size:", min_n, "\n")
+```
+
+### Analysis with Parameters
+
+```{r param-analysis}
+# Filter based on parameters
+selected_data <- penguins %>%
+  filter(species == params$species, !is.na(body_mass_g))
+
+# Check sample size
+if (nrow(selected_data) < params$min_sample_size) {
+  stop("Not enough samples! Need at least ", params$min_sample_size)
+}
+
+# Summarize
+summary_stats <- selected_data %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g),
+    sd_mass = sd(body_mass_g)
+  )
+
+summary_stats
+```
+
+### Rendering with Different Parameters
+
+```{r render-params, eval=FALSE}
+# From R console:
+rmarkdown::render(
+  "analysis_report.Rmd",
+  params = list(species = "Chinstrap", min_sample_size = 20),
+  output_file = "chinstrap_report.html"
+)
+
+# Create reports for all species
+for (sp in c("Adelie", "Chinstrap", "Gentoo")) {
+  rmarkdown::render(
+    "analysis_report.Rmd",
+    params = list(species = sp, min_sample_size = 30),
+    output_file = paste0(sp, "_report.html")
+  )
+}
+```
+
+### Interactive Parameters
+
+```{r interactive-params, eval=FALSE}
+# Click "Knit with Parameters" button in RStudio
+# Or:
+rmarkdown::render("report.Rmd", params = "ask")
+```
+
+## Advanced RMarkdown
+
+### Child Documents
+
+Break large reports into modules:
+
+```{r child-doc, eval=FALSE}
+# In main document:
+```
+
+```{r child='sections/data-cleaning.Rmd'}
+```
+
+```{r child='sections/analysis.Rmd'}
+```
+
+```{r child='sections/visualization.Rmd'}
+```
+
+\`\`\`
+
+### Conditional Content
+
+```{r conditional-content}
+# Only show detailed diagnostics if requested
+show_diagnostics <- FALSE  # Could be a parameter
+
+if (show_diagnostics) {
+  cat("## Detailed Diagnostics\n")
+  # Complex diagnostic code here
+}
+```
+
+### Output Formats
+
+```{r output-formats, eval=FALSE}
+# YAML header options:
+
+# HTML with table of contents
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+
+# PDF
+output: pdf_document
+
+# Word
+output: word_document
+
+# Multiple formats
+output:
+  html_document: default
+  pdf_document: default
+```
+
+## Session Information
+
+**Always include at end of analysis!**
+
+```{r session-info}
+# Document your environment
+sessionInfo()
+```
+
+Better formatted version:
+
+```{r session-info-better}
+library(sessioninfo)
+session_info()
+```
+
+## README Files
+
+Every project needs a README!
+
+### Example README.md
+
+```markdown
+# RNA-seq Analysis: Disease vs Control
+
+## Overview
+Analysis of RNA-seq data comparing diseased and control samples.
+
+## Structure
+- `data/raw/`: Original count files
+- `data/processed/`: Normalized counts
+- `scripts/`: Analysis scripts (run in order)
+- `results/`: Differential expression tables
+- `figures/`: Publication-quality figures
+
+## Requirements
+- R >= 4.3.0
+- See renv.lock for package versions
+
+## Setup
+1. Open RNA-seq-analysis.Rproj
+2. Run `renv::restore()` to install packages
+3. Run scripts in order:
+   - 01_data_cleaning.R
+   - 02_normalization.R
+   - 03_differential_expression.R
+
+## Data
+Raw data available at: [DOI/URL]
+
+## Contact
+Your Name (email@university.edu)
+```
+
+## Code Organization Tips
+
+### Script Headers
+
+```{r script-header, eval=FALSE}
+# ============================================================================
+# Analysis of Tumor Growth Data
+#
+# Author: Your Name
+# Date: 2024-03-15
+# Purpose: Compare tumor volumes between treatment groups
+#
+# Input: data/raw/tumor_measurements.csv
+# Output: results/tumor_stats.csv, figures/growth_curves.png
+# ============================================================================
+
+# Load packages ----
+library(tidyverse)
+library(here)
+
+# Set parameters ----
+SIGNIFICANCE_THRESHOLD <- 0.05
+MIN_TUMOR_SIZE <- 50  # mm³
+
+# Read data ----
+# ...
+```
+
+### Section Markers
+
+```{r section-markers, eval=FALSE}
+# Data Loading ----
+
+# Data Cleaning ----
+
+# Exploratory Analysis ----
+
+# Statistical Testing ----
+
+# Visualization ----
+```
+
+RStudio recognizes `----` and creates code outline!
+
+### Custom Functions
+
+```{r custom-functions-example, eval=FALSE}
+# functions/stats_helpers.R
+
+#' Calculate fold change with pseudocount
+#'
+#' @param treated Vector of treated values
+#' @param control Vector of control values
+#' @param pseudocount Small value to avoid log(0)
+#' @return Numeric vector of fold changes
+calculate_fold_change <- function(treated, control, pseudocount = 1) {
+  log2((treated + pseudocount) / (control + pseudocount))
+}
+
+# In main script:
+source(here("functions", "stats_helpers.R"))
+fc <- calculate_fold_change(treated_expr, control_expr)
+```
+
+## Reproducibility Checklist
+
+### Before Sharing Analysis
+
+- [ ] Code runs from top to bottom without errors
+- [ ] All file paths use `here()` or are relative
+- [ ] Required packages documented (renv.lock or list)
+- [ ] R version documented (session_info())
+- [ ] Data sources documented (README)
+- [ ] Random seeds set (`set.seed()`)
+- [ ] No `install.packages()` in scripts
+- [ ] No `setwd()` or absolute paths
+- [ ] README explains project structure
+- [ ] Sensitive data removed/anonymized
+
+### Documentation to Include
+
+```{r documentation-template, eval=FALSE}
+# At end of analysis script or RMarkdown:
+
+# Session Information ----
+sessioninfo::session_info()
+
+# File Information ----
+cat("Script:", here::here(), "\n")
+cat("Date:", Sys.Date(), "\n")
+cat("Git commit:", system("git rev-parse HEAD", intern = TRUE), "\n")
+
+# Data provenance ----
+cat("Data source: GSE12345 downloaded 2024-03-15\n")
+cat("Sample size:", nrow(data), "\n")
+```
+
+## Version Control Integration
+
+### .gitignore for R Projects
+
+```bash
+# .gitignore
+
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Data (usually don't commit large data files)
+data/raw/*.csv
+data/raw/*.txt
+*.fastq.gz
+
+# Output
+*.html
+*.pdf
+figures/*.png
+
+# renv (commit renv.lock, but not library)
+renv/library/
+renv/staging/
+
+# Keep these:
+!renv.lock
+!renv/activate.R
+```
+
+## Real-World Example: Complete Project
+
+```{r complete-project, eval=FALSE}
+# Project: microbiome-analysis.Rproj
+
+# ── 01_setup.R ──
+library(tidyverse)
+library(here)
+
+# Initialize renv (once)
+renv::init()
+
+# Install packages
+install.packages(c("tidyverse", "vegan", "phyloseq"))
+renv::snapshot()
+
+# ── 02_import_data.R ──
+library(tidyverse)
+library(here)
+
+# Read OTU table
+otu <- read_tsv(here("data", "raw", "otu_table.txt"))
+
+# Read metadata
+metadata <- read_csv(here("data", "raw", "sample_metadata.csv"))
+
+# Save processed
+save(otu, metadata, file = here("data", "processed", "data.RData"))
+
+# ── 03_analysis.Rmd ──
+---
+title: "Microbiome Analysis"
+output:
+  html_document:
+    toc: true
+params:
+  min_reads: 1000
+  treatment: "antibiotic"
+---
+
+## Load data
+load(here::here("data", "processed", "data.RData"))
+
+## Filter samples
+filtered <- otu %>%
+  filter(total_reads > params$min_reads)
+
+## Analysis...
+
+## Session Info
+sessioninfo::session_info()
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Create a new R Project with proper directory structure
+# Include data/, scripts/, results/, and figures/ folders
+
+
+# Exercise 2: Write a script that uses here() to:
+# - Read data from data/raw/
+# - Save processed data to data/processed/
+# - Save a figure to figures/
+
+
+# Exercise 3: Create a parameterized report that takes:
+# - dataset name
+# - significance threshold
+# - output format
+# Run it with 3 different parameter sets
+
+
+# Exercise 4: Set up renv in a project, install packages,
+# create snapshot, remove a package, restore from snapshot
+
+
+# Exercise 5: Create a complete analysis with:
+# - Proper directory structure
+# - README.md
+# - Session info at end
+# - All paths using here()
+```
+
+## Common Mistakes
+
+1. **Absolute paths**
+   ```{r mistake-1, eval=FALSE}
+   # Bad
+   read_csv("/Users/jane/data.csv")
+
+   # Good
+   read_csv(here("data", "raw", "data.csv"))
+   ```
+
+2. **Saving workspace**
+   ```{r mistake-2, eval=FALSE}
+   # Bad - hidden dependencies
+   save.image()
+
+   # Good - explicit
+   save(important_object, file = here("results", "results.RData"))
+   ```
+
+3. **Installing in scripts**
+   ```{r mistake-3, eval=FALSE}
+   # Bad - runs every time
+   install.packages("tidyverse")
+   library(tidyverse)
+
+   # Good - separate setup
+   # (install once, then just library())
+   library(tidyverse)
+   ```
+
+## Key Takeaways
+
+- **R Projects** keep work organized and portable
+- **here()** makes file paths robust
+- **renv** ensures package version reproducibility
+- **Directory structure** aids understanding
+- **Parameters** make reports flexible
+- **Documentation** includes README and session info
+- **Version control** tracks changes over time
+- **Reproducibility** means anyone (including future you) can run it
+
+## Resources
+
+- [R for Reproducible Scientific Analysis](https://swcarpentry.github.io/r-novice-gapminder/)
+- [renv documentation](https://rstudio.github.io/renv/)
+- [R Markdown Cookbook](https://bookdown.org/yihui/rmarkdown-cookbook/)
+- [Project-oriented workflow](https://www.tidyverse.org/blog/2017/12/workflow-vs-script/)
+
+---
+
+**Homework:**
+
+1. Convert an existing analysis to an R Project
+2. Reorganize files into proper directory structure
+3. Replace all absolute paths with here()
+4. Add renv for package management
+5. Create a README documenting the project
+6. Add session info to analysis
+7. Make one report parameterized and run with different parameters
+8. Share with a colleague - can they run it?
+
+**The ultimate test: Can you run your own analysis 6 months from now?**

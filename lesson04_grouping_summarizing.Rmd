@@ -1,0 +1,432 @@
+---
+title: "Lesson 4: Grouping and Summarizing Data"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Use `group_by()` to create groups in your data
+2. Use `summarise()` to calculate summary statistics
+3. Combine grouping and summarizing for powerful analyses
+4. Count observations with `count()` and `n()`
+5. Calculate multiple statistics at once
+6. Apply these skills to experimental data analysis
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(palmerpenguins)
+
+penguins <- penguins
+```
+
+## Why Group and Summarize?
+
+In biological research, we constantly compare groups:
+
+- Control vs Treatment
+- Male vs Female
+- Species A vs Species B vs Species C
+- Time points: Day 0, Day 1, Day 2...
+
+Grouping and summarizing lets us calculate statistics for each group automatically!
+
+## summarise(): Calculate Summary Statistics
+
+`summarise()` (or `summarize()`) reduces your data to summary statistics.
+
+### Basic Summaries
+
+```{r summarise-basic}
+# Overall mean body mass
+penguins %>%
+  summarise(mean_mass = mean(body_mass_g, na.rm = TRUE))
+
+# Multiple statistics at once
+penguins %>%
+  summarise(
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    sd_mass = sd(body_mass_g, na.rm = TRUE),
+    min_mass = min(body_mass_g, na.rm = TRUE),
+    max_mass = max(body_mass_g, na.rm = TRUE),
+    n_penguins = n()  # count of observations
+  )
+```
+
+## group_by(): The Real Power
+
+`group_by()` tells R to perform operations separately for each group.
+
+### Grouping by One Variable
+
+```{r group-one}
+# Mean body mass by species
+penguins %>%
+  group_by(species) %>%
+  summarise(
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    n = n()
+  )
+```
+
+This is much more useful than the overall mean! We can see Gentoo penguins are much larger.
+
+### More Statistics by Group
+
+```{r group-stats}
+# Comprehensive summary by species
+species_summary <- penguins %>%
+  group_by(species) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    sd_mass = sd(body_mass_g, na.rm = TRUE),
+    mean_flipper = mean(flipper_length_mm, na.rm = TRUE),
+    sd_flipper = sd(flipper_length_mm, na.rm = TRUE)
+  )
+
+species_summary
+```
+
+### Grouping by Multiple Variables
+
+```{r group-multiple}
+# Mean body mass by species AND sex
+penguins %>%
+  group_by(species, sex) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    sd_mass = sd(body_mass_g, na.rm = TRUE)
+  )
+```
+
+Notice males are heavier than females in all species!
+
+### Grouping by Three Variables
+
+```{r group-three}
+# Mean body mass by species, sex, AND island
+penguins %>%
+  group_by(species, island, sex) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE)
+  ) %>%
+  arrange(species, island, sex)
+```
+
+## Common Summary Functions
+
+Here are functions you'll use frequently:
+
+```{r summary-functions}
+penguins %>%
+  group_by(species) %>%
+  summarise(
+    # Central tendency
+    mean_bill = mean(bill_length_mm, na.rm = TRUE),
+    median_bill = median(bill_length_mm, na.rm = TRUE),
+
+    # Spread
+    sd_bill = sd(bill_length_mm, na.rm = TRUE),
+    var_bill = var(bill_length_mm, na.rm = TRUE),
+
+    # Range
+    min_bill = min(bill_length_mm, na.rm = TRUE),
+    max_bill = max(bill_length_mm, na.rm = TRUE),
+
+    # Count
+    n_obs = n(),
+    n_missing = sum(is.na(bill_length_mm))
+  )
+```
+
+## count(): A Shortcut for Counting
+
+`count()` is a quick way to count observations in groups:
+
+```{r count}
+# How many penguins per species?
+penguins %>%
+  count(species)
+
+# By species and island
+penguins %>%
+  count(species, island)
+
+# Sort by count
+penguins %>%
+  count(species, sort = TRUE)
+```
+
+This is equivalent to:
+
+```{r count-equivalent}
+penguins %>%
+  group_by(species) %>%
+  summarise(n = n())
+```
+
+## Calculating Proportions
+
+```{r proportions}
+# What proportion of penguins are each species?
+penguins %>%
+  count(species) %>%
+  mutate(proportion = n / sum(n))
+
+# As percentages
+penguins %>%
+  count(species) %>%
+  mutate(
+    proportion = n / sum(n),
+    percent = round(proportion * 100, 1)
+  )
+```
+
+## Filtering After Summarizing
+
+You can filter summary results:
+
+```{r filter-summary}
+# Only show species with mean body mass > 4500g
+penguins %>%
+  group_by(species) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE)
+  ) %>%
+  filter(mean_mass > 4500)
+```
+
+## Combining with Other dplyr Verbs
+
+The real power comes from combining operations:
+
+### Example 1: Filter, Group, Summarize
+
+```{r combine-1}
+# Summary statistics for only 2009 data
+penguins %>%
+  filter(year == 2009) %>%
+  group_by(species, sex) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    se_mass = sd(body_mass_g, na.rm = TRUE) / sqrt(n())  # standard error
+  )
+```
+
+### Example 2: Group, Summarize, Arrange
+
+```{r combine-2}
+# Which species-island combo has the highest mean body mass?
+penguins %>%
+  group_by(species, island) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE)
+  ) %>%
+  arrange(desc(mean_mass))
+```
+
+### Example 3: Complex Pipeline
+
+```{r combine-3}
+# Find islands where female penguins average > 4000g
+penguins %>%
+  filter(sex == "female", !is.na(body_mass_g)) %>%
+  group_by(island) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g),
+    sd_mass = sd(body_mass_g)
+  ) %>%
+  filter(mean_mass > 4000) %>%
+  arrange(desc(mean_mass))
+```
+
+## Real-World Biology Example: Cell Growth
+
+```{r biology-example}
+# Simulated bacterial growth experiment
+growth_data <- tibble(
+  strain = rep(c("WT", "mutant_A", "mutant_B"), each = 12),
+  replicate = rep(1:3, times = 12),
+  timepoint_hr = rep(c(0, 2, 4, 6), each = 3, times = 3),
+  od600 = c(
+    # WT
+    0.05, 0.05, 0.05,  # 0hr
+    0.3, 0.32, 0.28,   # 2hr
+    0.85, 0.90, 0.82,  # 4hr
+    1.2, 1.25, 1.18,   # 6hr
+    # mutant_A (slower growth)
+    0.05, 0.05, 0.05,
+    0.15, 0.18, 0.16,
+    0.45, 0.48, 0.43,
+    0.72, 0.75, 0.70,
+    # mutant_B (similar to WT)
+    0.05, 0.05, 0.05,
+    0.28, 0.30, 0.29,
+    0.80, 0.85, 0.82,
+    1.15, 1.20, 1.18
+  )
+)
+
+# Calculate mean and SE for each strain at each timepoint
+growth_summary <- growth_data %>%
+  group_by(strain, timepoint_hr) %>%
+  summarise(
+    n = n(),
+    mean_od600 = mean(od600),
+    sd_od600 = sd(od600),
+    se_od600 = sd_od600 / sqrt(n)
+  )
+
+growth_summary
+
+# Which strain grows fastest at 6 hours?
+growth_data %>%
+  filter(timepoint_hr == 6) %>%
+  group_by(strain) %>%
+  summarise(mean_od600 = mean(od600)) %>%
+  arrange(desc(mean_od600))
+```
+
+## Visualizing Summarized Data
+
+Summarized data is perfect for plotting:
+
+```{r plot-summary}
+# Plot species means with error bars
+penguins %>%
+  group_by(species) %>%
+  summarise(
+    n = n(),
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    se_mass = sd(body_mass_g, na.rm = TRUE) / sqrt(n)
+  ) %>%
+  ggplot(aes(x = species, y = mean_mass)) +
+  geom_col(fill = "steelblue") +
+  geom_errorbar(aes(ymin = mean_mass - se_mass,
+                    ymax = mean_mass + se_mass),
+                width = 0.2) +
+  labs(title = "Mean Body Mass by Species",
+       x = "Species",
+       y = "Body Mass (g) ± SE") +
+  theme_minimal()
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Calculate mean and SD of flipper length for each island
+
+
+# Exercise 2: How many penguins of each sex were observed each year?
+
+
+# Exercise 3: Which species-sex combination has the longest average bill?
+
+
+# Exercise 4: For each species, what percentage of observations are from each island?
+
+
+# Exercise 5: Calculate the coefficient of variation (CV = sd/mean * 100)
+#             of body mass for each species. Which is most variable?
+
+
+```
+
+## Advanced: Grouping Without Summarizing
+
+Sometimes you want to calculate within groups but keep all rows:
+
+```{r group-mutate}
+# Calculate z-scores within each species
+penguins %>%
+  group_by(species) %>%
+  mutate(
+    species_mean_mass = mean(body_mass_g, na.rm = TRUE),
+    species_sd_mass = sd(body_mass_g, na.rm = TRUE),
+    z_score = (body_mass_g - species_mean_mass) / species_sd_mass
+  ) %>%
+  select(species, body_mass_g, z_score) %>%
+  head(10)
+```
+
+Don't forget to `ungroup()` when done:
+
+```{r ungroup}
+penguins_grouped <- penguins %>%
+  group_by(species)
+
+# Check grouping
+groups(penguins_grouped)
+
+# Remove grouping
+penguins_ungrouped <- penguins_grouped %>%
+  ungroup()
+
+groups(penguins_ungrouped)
+```
+
+## Common Pitfalls
+
+### 1. Forgetting na.rm = TRUE
+
+```{r pitfall-1}
+# This returns NA because there are missing values
+penguins %>%
+  group_by(species) %>%
+  summarise(mean_mass = mean(body_mass_g))
+
+# This works
+penguins %>%
+  group_by(species) %>%
+  summarise(mean_mass = mean(body_mass_g, na.rm = TRUE))
+```
+
+### 2. Grouping Variables in Output
+
+```{r pitfall-2}
+# Grouping variables are automatically included
+penguins %>%
+  group_by(species) %>%
+  summarise(mean_mass = mean(body_mass_g, na.rm = TRUE))
+# species column is automatically there!
+```
+
+## Key Takeaways
+
+- `group_by()` creates groups for subsequent operations
+- `summarise()` calculates summary statistics
+- Together they're powerful for comparing groups
+- Always use `na.rm = TRUE` with statistical functions
+- `n()` counts observations in each group
+- `count()` is a shortcut for `group_by() %>% summarise(n = n())`
+- You can group by multiple variables
+- Combine with other dplyr verbs for complex analyses
+
+## Next Steps
+
+In Lesson 5, we'll dive deep into data visualization with ggplot2, learning to create publication-quality figures!
+
+---
+
+**Homework:** Analyze the penguins data to answer:
+
+1. What is the mean bill length for each species-sex combination?
+2. Which year had the most observations?
+3. Calculate mean body mass by species and island, then create a bar plot
+4. For each species, what's the difference between male and female mean body mass?

@@ -1,0 +1,469 @@
+---
+title: "Lesson 5: Data Visualization with ggplot2"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 5)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Understand the grammar of graphics (ggplot2's philosophy)
+2. Create histograms, box plots, scatter plots, and bar plots
+3. Use aesthetics (color, size, shape) to represent data
+4. Facet plots to show multiple subplots
+5. Customize plot appearance with themes and labels
+6. Create publication-quality figures
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(palmerpenguins)
+
+penguins <- penguins
+```
+
+## The Grammar of Graphics
+
+ggplot2 builds plots in layers:
+
+1. **Data**: What dataset?
+2. **Aesthetics**: What variables map to x, y, color, etc.?
+3. **Geometries**: What shapes (points, lines, bars)?
+4. **Scales**: How to represent values?
+5. **Themes**: Overall appearance
+
+Basic template:
+
+```{r template, eval=FALSE}
+ggplot(data = <DATA>, mapping = aes(<MAPPINGS>)) +
+  <GEOM_FUNCTION>()
+```
+
+## Your First Plot
+
+```{r first-plot}
+ggplot(data = penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point()
+```
+
+Let's break it down:
+
+- `ggplot()`: Initialize the plot
+- `data = penguins`: Use this dataset
+- `aes()`: Aesthetic mappings (x = flipper, y = body mass)
+- `geom_point()`: Draw points
+
+## Adding Color
+
+Map a variable to color:
+
+```{r color}
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point()
+```
+
+Each species gets a different color automatically!
+
+## Adding More Aesthetics
+
+```{r aesthetics}
+ggplot(penguins, aes(x = flipper_length_mm,
+                     y = body_mass_g,
+                     color = species,
+                     shape = species)) +
+  geom_point(size = 3, alpha = 0.7)
+```
+
+- `shape`: Different shapes per species
+- `size`: Point size (not mapped to data, so outside aes())
+- `alpha`: Transparency (0 = transparent, 1 = opaque)
+
+## Plot Types for Biology
+
+### 1. Histograms - Distribution of One Variable
+
+```{r histogram}
+ggplot(penguins, aes(x = body_mass_g)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Penguin Body Mass",
+       x = "Body Mass (g)",
+       y = "Count") +
+  theme_minimal()
+```
+
+### 2. Density Plots - Smooth Distribution
+
+```{r density}
+ggplot(penguins, aes(x = body_mass_g, fill = species)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Body Mass Distribution by Species",
+       x = "Body Mass (g)",
+       y = "Density") +
+  theme_minimal()
+```
+
+### 3. Box Plots - Compare Distributions
+
+```{r boxplot}
+ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Body Mass by Species",
+       x = "Species",
+       y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove redundant legend
+```
+
+**Box plot interpretation:**
+
+- Box: Interquartile range (IQR, 25th to 75th percentile)
+- Line in box: Median
+- Whiskers: ~1.5 × IQR
+- Points: Potential outliers
+
+### 4. Violin Plots - Detailed Distributions
+
+```{r violin}
+ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_violin(alpha = 0.5) +
+  geom_jitter(width = 0.1, alpha = 0.3) +  # Add actual points
+  labs(title = "Body Mass Distribution by Species",
+       x = "Species",
+       y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### 5. Bar Plots - Counts or Summary Statistics
+
+```{r barplot-count}
+# Counts
+ggplot(penguins, aes(x = species, fill = species)) +
+  geom_bar() +
+  labs(title = "Number of Penguins by Species",
+       x = "Species",
+       y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+For summary statistics, use `geom_col()`:
+
+```{r barplot-summary}
+# First calculate means
+species_means <- penguins %>%
+  group_by(species) %>%
+  summarise(
+    mean_mass = mean(body_mass_g, na.rm = TRUE),
+    se_mass = sd(body_mass_g, na.rm = TRUE) / sqrt(n())
+  )
+
+# Plot means with error bars
+ggplot(species_means, aes(x = species, y = mean_mass, fill = species)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_mass - se_mass,
+                    ymax = mean_mass + se_mass),
+                width = 0.2) +
+  labs(title = "Mean Body Mass by Species",
+       x = "Species",
+       y = "Body Mass (g) ± SE") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### 6. Scatter Plots - Relationships
+
+```{r scatter}
+ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm, color = species)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(title = "Bill Dimensions Across Species",
+       x = "Bill Length (mm)",
+       y = "Bill Depth (mm)",
+       color = "Species") +
+  theme_minimal()
+```
+
+### 7. Line Plots - Time Series or Trends
+
+```{r line-plot}
+# Count penguins per year
+yearly_counts <- penguins %>%
+  count(year, species)
+
+ggplot(yearly_counts, aes(x = year, y = n, color = species, group = species)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  labs(title = "Penguin Observations Over Time",
+       x = "Year",
+       y = "Number of Observations",
+       color = "Species") +
+  theme_minimal()
+```
+
+## Adding Trend Lines
+
+```{r trends}
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(aes(color = species), alpha = 0.6) +
+  geom_smooth(method = "lm", color = "black", linetype = "dashed") +  # Overall trend
+  geom_smooth(aes(color = species), method = "lm", se = FALSE) +  # Per species
+  labs(title = "Body Mass vs Flipper Length",
+       x = "Flipper Length (mm)",
+       y = "Body Mass (g)") +
+  theme_minimal()
+```
+
+## Faceting - Multiple Panels
+
+Faceting creates separate panels for subgroups:
+
+### Facet by One Variable
+
+```{r facet-wrap}
+ggplot(penguins, aes(x = body_mass_g, fill = sex)) +
+  geom_histogram(bins = 20) +
+  facet_wrap(~species) +
+  labs(title = "Body Mass Distribution by Species",
+       x = "Body Mass (g)",
+       y = "Count") +
+  theme_minimal()
+```
+
+### Facet by Two Variables
+
+```{r facet-grid}
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(aes(color = species)) +
+  facet_grid(sex ~ island) +
+  labs(title = "Body Mass vs Flipper Length",
+       subtitle = "Faceted by Sex (rows) and Island (columns)") +
+  theme_minimal()
+```
+
+## Customizing Appearance
+
+### Labels and Titles
+
+```{r labels}
+ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  labs(
+    title = "Penguin Body Mass Varies by Species",
+    subtitle = "Data from Palmer Station, Antarctica",
+    x = "Species",
+    y = "Body Mass (grams)",
+    fill = "Penguin Species",
+    caption = "Data source: palmerpenguins package"
+  ) +
+  theme_minimal()
+```
+
+### Color Scales
+
+```{r color-scales}
+# Manual colors
+ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Adelie" = "#FF6B35",
+                                "Chinstrap" = "#4ECDC4",
+                                "Gentoo" = "#95B46A")) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Viridis palette (colorblind-friendly)
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g, color = body_mass_g)) +
+  geom_point(size = 2) +
+  scale_color_viridis_c() +
+  theme_minimal()
+```
+
+### Themes
+
+```{r themes}
+# Try different themes
+p <- ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Body Mass by Species")
+
+# Different built-in themes
+p + theme_minimal()
+p + theme_classic()
+p + theme_bw()
+p + theme_light()
+```
+
+### Custom Theme Elements
+
+```{r custom-theme}
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point(size = 2, alpha = 0.7) +
+  labs(title = "Flipper Length vs Body Mass",
+       x = "Flipper Length (mm)",
+       y = "Body Mass (g)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+## Saving Plots
+
+```{r save-plots, eval=FALSE}
+# Save the last plot
+ggsave("penguin_plot.png", width = 8, height = 5, dpi = 300)
+
+# Save a specific plot
+my_plot <- ggplot(penguins, aes(x = species, fill = species)) +
+  geom_bar() +
+  theme_minimal()
+
+ggsave("species_counts.png", plot = my_plot, width = 6, height = 4, dpi = 300)
+
+# Different formats
+ggsave("figure.pdf", width = 8, height = 5)
+ggsave("figure.svg", width = 8, height = 5)
+```
+
+## Real-World Example: Growth Curve
+
+```{r growth-curve}
+# Simulated bacterial growth data
+growth <- tibble(
+  time_hr = rep(0:24, times = 3),
+  strain = rep(c("WT", "mutant_A", "mutant_B"), each = 25),
+  od600 = c(
+    # WT
+    0.05, 0.08, 0.15, 0.28, 0.52, 0.85, 1.2, 1.45, 1.6, 1.7,
+    1.75, 1.78, 1.8, 1.8, 1.79, 1.78, 1.76, 1.74, 1.71, 1.68,
+    1.65, 1.62, 1.58, 1.54, 1.50,
+    # mutant_A (slower)
+    0.05, 0.06, 0.09, 0.14, 0.22, 0.35, 0.52, 0.71, 0.89, 1.05,
+    1.18, 1.28, 1.35, 1.40, 1.42, 1.43, 1.43, 1.42, 1.40, 1.38,
+    1.35, 1.32, 1.28, 1.24, 1.20,
+    # mutant_B (faster)
+    0.05, 0.10, 0.20, 0.38, 0.68, 1.05, 1.42, 1.68, 1.82, 1.88,
+    1.90, 1.90, 1.88, 1.85, 1.82, 1.78, 1.73, 1.68, 1.62, 1.56,
+    1.50, 1.44, 1.37, 1.30, 1.23
+  )
+)
+
+ggplot(growth, aes(x = time_hr, y = od600, color = strain)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Bacterial Growth Curves",
+       x = "Time (hours)",
+       y = "Optical Density (600 nm)",
+       color = "Strain") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = c(0.15, 0.85),
+    legend.background = element_rect(fill = "white", color = "black")
+  )
+```
+
+## Combining Plots with patchwork
+
+```{r patchwork}
+# Install if needed: install.packages("patchwork")
+library(patchwork)
+
+p1 <- ggplot(penguins, aes(x = species, fill = species)) +
+  geom_bar() +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+p2 <- ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+p3 <- ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point() +
+  theme_minimal()
+
+# Combine
+(p1 | p2) / p3
+```
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Create a histogram of flipper length, colored by species
+
+
+# Exercise 2: Create a scatter plot of bill length vs bill depth with a trend line
+
+
+# Exercise 3: Create a bar plot showing the count of penguins per island,
+#             with bars filled by species (hint: use position = "dodge")
+
+
+# Exercise 4: Create box plots of body mass by sex, faceted by species
+
+
+# Exercise 5: Create a scatter plot and customize it with:
+#             - Custom colors
+#             - Meaningful labels
+#             - A theme you like
+#             - Larger points with transparency
+
+
+```
+
+## Quick Reference: Common Geoms
+
+- `geom_point()`: Scatter plot
+- `geom_line()`: Line plot
+- `geom_bar()`: Bar plot (counts)
+- `geom_col()`: Bar plot (values)
+- `geom_histogram()`: Histogram
+- `geom_boxplot()`: Box plot
+- `geom_violin()`: Violin plot
+- `geom_density()`: Density plot
+- `geom_smooth()`: Trend line
+- `geom_errorbar()`: Error bars
+- `geom_jitter()`: Jittered points
+
+## Tips for Publication-Quality Figures
+
+1. **Use appropriate plot types** for your data
+2. **Label everything clearly** (title, axes, legend)
+3. **Choose colorblind-friendly palettes** (viridis, colorbrewer)
+4. **Use appropriate size** (usually width 6-8 inches)
+5. **Save at high resolution** (dpi = 300 or higher)
+6. **Keep it simple** - remove unnecessary elements
+7. **Use consistent styling** across figures in a paper
+
+## Key Takeaways
+
+- ggplot2 builds plots in layers
+- Start with `ggplot(data, aes(...))`, then add geoms
+- Use `aes()` to map variables to visual properties
+- Faceting creates multi-panel figures
+- Themes control overall appearance
+- Save plots with `ggsave()`
+- Good visualizations are essential for understanding data
+
+## Next Steps
+
+In Lesson 6, we'll learn about joining datasets and reshaping data between wide and long formats!
+
+---
+
+**Homework:**
+
+1. Create three different plots exploring the penguins data
+2. Customize each with appropriate labels, colors, and themes
+3. Save them as high-resolution PNG files
+4. Write a caption for each plot explaining what it shows

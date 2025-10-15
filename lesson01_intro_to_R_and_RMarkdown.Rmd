@@ -1,0 +1,239 @@
+---
+title: "Lesson 1: Introduction to R and RMarkdown"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Understand what R and RMarkdown are and why they're useful for biological research
+2. Write and execute R code in code chunks
+3. Use R as a calculator and understand basic data types
+4. Create and manipulate vectors
+5. Knit an RMarkdown document to HTML
+
+## What is R?
+
+R is a programming language and environment designed for statistical computing and graphics. It's widely used in biological research for:
+
+- Analyzing experimental data
+- Creating publication-quality figures
+- Performing statistical tests
+- Reproducible research
+
+## What is RMarkdown?
+
+RMarkdown allows you to combine:
+
+- **Narrative text** (like this paragraph)
+- **Code** (R commands)
+- **Output** (results, figures, tables)
+
+This makes your analysis reproducible and easy to share with collaborators!
+
+## Your First R Code
+
+Let's start simple. R can work as a calculator:
+
+```{r basic-math}
+# Addition
+5 + 3
+
+# Multiplication
+4 * 7
+
+# Division
+20 / 4
+
+# Exponentiation (useful for calculating concentrations!)
+10^-6  # 1 micromolar in molar
+```
+
+**Note:** Lines starting with `#` are comments - R ignores them. Use comments to explain your code!
+
+## Variables: Storing Values
+
+In the lab, you label your tubes. In R, you label your data with variables:
+
+```{r variables}
+# Store a single value
+sample_concentration <- 2.5
+
+# View the value
+sample_concentration
+
+# Use it in calculations
+dilution_factor <- 10
+final_concentration <- sample_concentration / dilution_factor
+final_concentration
+```
+
+The `<-` symbol is the assignment operator. Think of it as putting a value into a labeled container.
+
+## Data Types
+
+R has several basic data types:
+
+```{r data-types}
+# Numeric (numbers)
+cell_count <- 1500000
+temperature <- 37.5
+
+# Character (text)
+species <- "Escherichia coli"
+treatment <- "control"
+
+# Logical (TRUE or FALSE)
+is_significant <- TRUE
+culture_contaminated <- FALSE
+
+# Check the type
+class(cell_count)
+class(species)
+class(is_significant)
+```
+
+## Vectors: Multiple Values
+
+In biology, we rarely work with single measurements. Vectors store multiple values:
+
+```{r vectors}
+# Create a vector with c() (combine)
+od600_readings <- c(0.1, 0.3, 0.6, 0.9, 1.2)
+od600_readings
+
+# Timepoints in hours
+timepoints <- c(0, 2, 4, 6, 8)
+timepoints
+
+# Character vectors
+samples <- c("control", "treatment_A", "treatment_B")
+samples
+```
+
+## Vector Operations
+
+You can perform calculations on entire vectors at once:
+
+```{r vector-operations}
+# Convert OD600 to estimated cell count (approximate)
+cells_per_ml <- od600_readings * 8e8
+cells_per_ml
+
+# All samples were diluted 1:10
+dilution <- 10
+actual_concentration <- cells_per_ml * dilution
+actual_concentration
+```
+
+## Accessing Vector Elements
+
+Use square brackets `[]` to access specific values:
+
+```{r indexing}
+# Get the first OD reading
+od600_readings[1]
+
+# Get the third and fourth readings
+od600_readings[c(3, 4)]
+
+# Get all readings except the first
+od600_readings[-1]
+
+# Get readings greater than 0.5
+od600_readings[od600_readings > 0.5]
+```
+
+## Useful Functions for Vectors
+
+```{r vector-functions}
+# How many measurements?
+length(od600_readings)
+
+# Summary statistics
+mean(od600_readings)
+median(od600_readings)
+sd(od600_readings)  # standard deviation
+min(od600_readings)
+max(od600_readings)
+
+# Get a quick summary
+summary(od600_readings)
+```
+
+## Creating Sequences
+
+Sequences are common in biological work (dilution series, time courses, etc.):
+
+```{r sequences}
+# Simple sequence
+days <- 1:7
+days
+
+# Sequence with specific step
+dilutions <- seq(from = 1, to = 0.001, by = -0.1)
+dilutions
+
+# Or specify how many values you want
+gradient <- seq(from = 0, to = 100, length.out = 11)
+gradient
+```
+
+## Practice Exercises
+
+Try these on your own:
+
+```{r exercise-1}
+# Exercise 1: Create a vector called 'pcr_ct_values' with these Ct values: 18.3, 19.1, 17.8, 20.2, 18.9
+
+
+# Exercise 2: Calculate the mean and standard deviation of these Ct values
+
+
+# Exercise 3: You diluted your samples 1:100. Create a variable for this dilution factor
+
+
+# Exercise 4: Create a vector of sample names: "Sample_1", "Sample_2", "Sample_3", "Sample_4", "Sample_5"
+
+
+```
+
+## Getting Help
+
+If you need help with a function, use `?`:
+
+```{r help, eval=FALSE}
+?mean
+?seq
+```
+
+## Knitting This Document
+
+To create an HTML report:
+
+1. Click the "Knit" button at the top of this pane
+2. Or use Ctrl+Shift+K (Windows/Linux) or Cmd+Shift+K (Mac)
+
+## Key Takeaways
+
+- R is a powerful tool for biological data analysis
+- RMarkdown combines code, results, and narrative
+- Use `<-` to assign values to variables
+- Vectors store multiple values of the same type
+- R can perform operations on entire vectors at once
+- Comments (`#`) help document your code
+
+## Next Steps
+
+In the next lesson, we'll learn how to import real data and explore it using the tidyverse!
+
+---
+
+**Homework:** Knit this document and experiment with changing some values in the code chunks. What happens if you change the OD600 readings? Try adding your own calculations!

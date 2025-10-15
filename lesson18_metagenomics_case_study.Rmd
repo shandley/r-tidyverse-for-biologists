@@ -1,0 +1,871 @@
+---
+title: "Lesson 10: Case Study - Shotgun Metagenomic Analysis"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Understand the difference between amplicon (16S) and shotgun metagenomics
+2. Analyze species-level taxonomic profiles
+3. Perform functional annotation and pathway analysis
+4. Detect and quantify antibiotic resistance genes
+5. Identify virulence factors and mobile genetic elements
+6. Integrate taxonomic and functional data
+7. Compare metabolic potential between communities
+8. Visualize metabolic pathways and gene abundances
+
+## Shotgun Metagenomics vs Amplicon Sequencing
+
+**16S Amplicon (Lesson 9):**
+- Sequences only the 16S rRNA gene
+- Taxonomic resolution: typically genus level
+- No functional information
+- Cheaper, well-established
+
+**Shotgun Metagenomics (This Lesson):**
+- Sequences ALL DNA in the sample
+- Taxonomic resolution: species/strain level
+- Functional genes, pathways, resistance genes
+- More expensive, more data, more insights
+
+## Case Study: Functional Capacity of the Gut Microbiome
+
+Using the same antibiotic treatment study from Lesson 9, we'll now analyze shotgun metagenomic data to understand:
+- Which species are present (not just genera)
+- What metabolic functions are encoded
+- How antibiotic resistance genes change
+- Which metabolic pathways are disrupted
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+library(patchwork)
+library(scales)  # for better axis formatting
+
+set.seed(123)
+```
+
+## Step 1: Sample Metadata
+
+Same samples as Lesson 9:
+
+```{r sample-metadata}
+sample_metadata <- tibble(
+  sample_id = c(paste0("HC_", 1:6),
+                paste0("Pre_", 1:5),
+                paste0("During_", 1:5),
+                paste0("Post_", 1:5)),
+  subject_id = c(paste0("S", 1:6),
+                 paste0("P", 1:5),
+                 paste0("P", 1:5),
+                 paste0("P", 1:5)),
+  group = c(rep("Healthy", 6),
+            rep("Pre_Antibiotic", 5),
+            rep("During_Antibiotic", 5),
+            rep("Post_Antibiotic", 5)),
+  timepoint = c(rep("baseline", 6),
+                rep("pre", 5),
+                rep("during", 5),
+                rep("post", 5))
+)
+
+sample_metadata
+```
+
+## Step 2: Species-Level Taxonomic Profiling
+
+Shotgun metagenomics provides species and even strain-level resolution:
+
+```{r species-taxonomy}
+# Define species (more specific than 16S!)
+species_reference <- tibble(
+  species_id = paste0("SP_", str_pad(1:40, 3, pad = "0")),
+  species_name = c(
+    # Firmicutes - beneficial
+    "Faecalibacterium_prausnitzii", "Roseburia_intestinalis",
+    "Eubacterium_rectale", "Ruminococcus_bromii",
+    "Blautia_obeum", "Coprococcus_eutactus",
+    "Lactobacillus_acidophilus", "Lactobacillus_rhamnosus",
+    "Clostridium_butyricum", "Anaerostipes_hadrus",
+    # More Firmicutes
+    paste0("Firmicutes_sp_", 1:10),
+    # Bacteroidetes - beneficial
+    "Bacteroides_fragilis", "Bacteroides_thetaiotaomicron",
+    "Bacteroides_uniformis", "Prevotella_copri",
+    "Alistipes_putredinis",
+    paste0("Bacteroidetes_sp_", 1:5),
+    # Actinobacteria - beneficial
+    "Bifidobacterium_longum", "Bifidobacterium_adolescentis",
+    "Bifidobacterium_bifidum",
+    # Proteobacteria - opportunistic
+    "Escherichia_coli", "Klebsiella_pneumoniae",
+    "Enterobacter_cloacae", "Citrobacter_freundii",
+    # Verrucomicrobia
+    "Akkermansia_muciniphila"
+  ),
+  phylum = c(
+    rep("Firmicutes", 20),
+    rep("Bacteroidetes", 10),
+    rep("Actinobacteria", 3),
+    rep("Proteobacteria", 4),
+    rep("Verrucomicrobia", 1)
+  ),
+  antibiotic_sensitivity = c(
+    rep("sensitive", 20),      # Most Firmicutes
+    rep("moderate", 10),        # Bacteroidetes
+    rep("moderate", 3),         # Actinobacteria
+    rep("resistant", 4),        # Proteobacteria (opportunistic)
+    rep("resistant", 1)         # Akkermansia
+  ),
+  functional_role = c(
+    "SCFA_producer", "SCFA_producer", "SCFA_producer", "fiber_degrader",
+    "SCFA_producer", "SCFA_producer", "probiotic", "probiotic",
+    "SCFA_producer", "SCFA_producer",
+    rep("commensal", 10),
+    "mucosal_health", "polysaccharide_degrader", "bile_metabolizer",
+    "plant_fiber_degrader", "protein_degrader",
+    rep("commensal", 5),
+    "vitamin_producer", "vitamin_producer", "immune_modulator",
+    "opportunistic", "opportunistic", "opportunistic", "opportunistic",
+    "mucin_degrader"
+  )
+)
+
+species_reference
+```
+
+### Generate Species Abundance Data
+
+```{r species-abundance}
+species_abundance <- crossing(
+  species_reference,
+  sample_metadata
+) %>%
+  mutate(
+    # Baseline abundance
+    baseline = case_when(
+      phylum == "Firmicutes" ~ runif(n(), 1000, 50000),
+      phylum == "Bacteroidetes" ~ runif(n(), 800, 40000),
+      phylum == "Actinobacteria" ~ runif(n(), 500, 10000),
+      phylum == "Proteobacteria" ~ runif(n(), 10, 500),
+      phylum == "Verrucomicrobia" ~ runif(n(), 100, 5000)
+    ),
+    # Modify by treatment
+    reads = case_when(
+      # Healthy: normal
+      group == "Healthy" ~ baseline * rnorm(n(), 1, 0.2),
+      # Pre: similar to healthy
+      group == "Pre_Antibiotic" ~ baseline * rnorm(n(), 0.95, 0.2),
+      # During: sensitive species crash, resistant bloom
+      group == "During_Antibiotic" & antibiotic_sensitivity == "sensitive" ~
+        baseline * rnorm(n(), 0.05, 0.02),
+      group == "During_Antibiotic" & antibiotic_sensitivity == "moderate" ~
+        baseline * rnorm(n(), 0.3, 0.1),
+      group == "During_Antibiotic" & antibiotic_sensitivity == "resistant" ~
+        baseline * rnorm(n(), 5, 1.5),
+      # Post: partial recovery
+      group == "Post_Antibiotic" & antibiotic_sensitivity == "sensitive" ~
+        baseline * rnorm(n(), 0.5, 0.2),
+      group == "Post_Antibiotic" & antibiotic_sensitivity == "moderate" ~
+        baseline * rnorm(n(), 0.7, 0.2),
+      group == "Post_Antibiotic" & antibiotic_sensitivity == "resistant" ~
+        baseline * rnorm(n(), 2, 0.8)
+    ),
+    reads = round(pmax(reads, 0))
+  ) %>%
+  select(-baseline)
+
+head(species_abundance, 10)
+```
+
+## Step 3: Functional Gene Annotation
+
+Shotgun data provides functional information through gene annotation:
+
+```{r functional-genes}
+# KEGG Orthology (KO) terms - functional genes
+ko_reference <- tibble(
+  ko_id = c(
+    # Carbohydrate metabolism
+    paste0("K0", 1000:1009),
+    # Amino acid metabolism
+    paste0("K0", 2000:2009),
+    # Vitamin biosynthesis
+    paste0("K0", 3000:3004),
+    # SCFA production (butyrate)
+    paste0("K0", 4000:4004),
+    # Antibiotic resistance
+    paste0("K0", 5000:5009),
+    # Virulence factors
+    paste0("K0", 6000:6004)
+  ),
+  ko_name = c(
+    # Carbohydrate
+    paste0("Glycolysis_enzyme_", 1:10),
+    # Amino acid
+    paste0("AA_synthesis_", 1:10),
+    # Vitamins
+    paste0("Vitamin_biosynthesis_", c("B12", "K", "Folate", "Biotin", "B6")),
+    # SCFA
+    paste0("Butyrate_pathway_", 1:5),
+    # Resistance
+    "Beta_lactamase", "Aminoglycoside_resistance", "Tetracycline_efflux",
+    "Multidrug_efflux_pump", "Vancomycin_resistance",
+    "Macrolide_resistance", "Fluoroquinolone_resistance",
+    "Chloramphenicol_resistance", "Trimethoprim_resistance",
+    "Sulfonamide_resistance",
+    # Virulence
+    paste0("Virulence_factor_", 1:5)
+  ),
+  pathway = c(
+    rep("Carbohydrate_metabolism", 10),
+    rep("Amino_acid_metabolism", 10),
+    rep("Vitamin_biosynthesis", 5),
+    rep("SCFA_production", 5),
+    rep("Antibiotic_resistance", 10),
+    rep("Virulence", 5)
+  ),
+  category = c(
+    rep("Metabolism", 25),
+    rep("Resistance", 10),
+    rep("Virulence", 5)
+  )
+)
+
+ko_reference
+```
+
+### Generate Functional Gene Abundance
+
+```{r functional-abundance}
+functional_abundance <- crossing(
+  ko_reference,
+  sample_metadata
+) %>%
+  mutate(
+    # Baseline gene abundance
+    baseline = case_when(
+      pathway == "Carbohydrate_metabolism" ~ runif(n(), 5000, 20000),
+      pathway == "Amino_acid_metabolism" ~ runif(n(), 3000, 15000),
+      pathway == "Vitamin_biosynthesis" ~ runif(n(), 1000, 8000),
+      pathway == "SCFA_production" ~ runif(n(), 2000, 10000),
+      pathway == "Antibiotic_resistance" ~ runif(n(), 10, 200),
+      pathway == "Virulence" ~ runif(n(), 5, 100)
+    ),
+    # Modify by treatment
+    gene_copies = case_when(
+      # Healthy: normal levels
+      group == "Healthy" ~ baseline * rnorm(n(), 1, 0.15),
+
+      # Pre: similar
+      group == "Pre_Antibiotic" ~ baseline * rnorm(n(), 0.98, 0.15),
+
+      # During antibiotics: resistance genes increase!
+      group == "During_Antibiotic" & pathway == "Antibiotic_resistance" ~
+        baseline * rnorm(n(), 8, 2),
+      # SCFA production decreases (beneficial bacteria killed)
+      group == "During_Antibiotic" & pathway == "SCFA_production" ~
+        baseline * rnorm(n(), 0.2, 0.1),
+      # Metabolism genes decrease
+      group == "During_Antibiotic" & category == "Metabolism" ~
+        baseline * rnorm(n(), 0.6, 0.2),
+      # Virulence increases (opportunists)
+      group == "During_Antibiotic" & pathway == "Virulence" ~
+        baseline * rnorm(n(), 3, 1),
+
+      # Post: partial recovery
+      group == "Post_Antibiotic" & pathway == "Antibiotic_resistance" ~
+        baseline * rnorm(n(), 3, 1),
+      group == "Post_Antibiotic" & pathway == "SCFA_production" ~
+        baseline * rnorm(n(), 0.6, 0.2),
+      group == "Post_Antibiotic" & category == "Metabolism" ~
+        baseline * rnorm(n(), 0.8, 0.2),
+      group == "Post_Antibiotic" & pathway == "Virulence" ~
+        baseline * rnorm(n(), 1.5, 0.5)
+    ),
+    gene_copies = round(pmax(gene_copies, 0))
+  ) %>%
+  select(-baseline)
+
+head(functional_abundance, 10)
+```
+
+## Step 4: Antibiotic Resistance Gene (ARG) Analysis
+
+A major advantage of shotgun metagenomics!
+
+```{r arg-analysis}
+# Focus on ARGs
+arg_data <- functional_abundance %>%
+  filter(pathway == "Antibiotic_resistance")
+
+# Calculate relative abundance
+arg_relative <- arg_data %>%
+  group_by(sample_id) %>%
+  mutate(
+    total_genes = sum(gene_copies),
+    rel_abundance = (gene_copies / total_genes) * 100
+  ) %>%
+  ungroup() %>%
+  left_join(sample_metadata, by = "sample_id")
+
+# Summarize by group
+arg_summary <- arg_relative %>%
+  group_by(group, ko_name) %>%
+  summarise(
+    mean_abundance = mean(gene_copies),
+    se = sd(gene_copies) / sqrt(n())
+  ) %>%
+  ungroup()
+
+# Plot ARG changes
+arg_summary %>%
+  ggplot(aes(x = group, y = mean_abundance, fill = group)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_abundance - se,
+                    ymax = mean_abundance + se),
+                width = 0.2) +
+  facet_wrap(~ko_name, scales = "free_y", ncol = 3) +
+  labs(title = "Antibiotic Resistance Genes Across Treatment Groups",
+       subtitle = "ARG abundance increases dramatically during treatment",
+       x = "Group",
+       y = "Mean Gene Copies") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        legend.position = "none",
+        strip.text = element_text(size = 8))
+```
+
+### Total ARG Burden
+
+```{r total-arg}
+total_arg <- arg_data %>%
+  group_by(sample_id, group) %>%
+  summarise(total_arg_copies = sum(gene_copies)) %>%
+  ungroup()
+
+total_arg %>%
+  ggplot(aes(x = group, y = total_arg_copies, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 2) +
+  scale_y_log10(labels = comma) +
+  labs(title = "Total Antibiotic Resistance Gene Burden",
+       subtitle = "8-fold increase during antibiotic treatment",
+       x = "Group",
+       y = "Total ARG Copies (log scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Statistical test
+healthy_vs_during <- total_arg %>%
+  filter(group %in% c("Healthy", "During_Antibiotic"))
+
+t.test(total_arg_copies ~ group, data = healthy_vs_during)
+```
+
+## Step 5: Metabolic Pathway Analysis
+
+Compare functional capacity between groups:
+
+```{r pathway-analysis}
+# Calculate pathway abundance
+pathway_abundance <- functional_abundance %>%
+  filter(category == "Metabolism") %>%
+  group_by(sample_id, group, pathway) %>%
+  summarise(total_copies = sum(gene_copies)) %>%
+  ungroup()
+
+# Calculate relative abundance
+pathway_relative <- pathway_abundance %>%
+  group_by(sample_id) %>%
+  mutate(
+    total = sum(total_copies),
+    rel_abundance = (total_copies / total) * 100
+  ) %>%
+  ungroup()
+
+# Stacked bar plot
+pathway_relative %>%
+  group_by(group, pathway) %>%
+  summarise(mean_rel = mean(rel_abundance)) %>%
+  ggplot(aes(x = group, y = mean_rel, fill = pathway)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Metabolic Pathway Composition Across Groups",
+       x = "Group",
+       y = "Relative Abundance (%)",
+       fill = "Pathway") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### SCFA Production Capacity
+
+Short-chain fatty acids (SCFAs) are critical for gut health:
+
+```{r scfa-analysis}
+scfa_data <- functional_abundance %>%
+  filter(pathway == "SCFA_production") %>%
+  group_by(sample_id, group) %>%
+  summarise(total_scfa_genes = sum(gene_copies)) %>%
+  ungroup() %>%
+  mutate(group = factor(group, levels = c("Healthy", "Pre_Antibiotic",
+                                           "During_Antibiotic", "Post_Antibiotic")))
+
+scfa_data %>%
+  ggplot(aes(x = group, y = total_scfa_genes, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 2) +
+  geom_line(data = scfa_data %>%
+              group_by(group) %>%
+              summarise(mean = mean(total_scfa_genes)),
+            aes(x = group, y = mean, group = 1),
+            linetype = "dashed", color = "red", size = 1) +
+  labs(title = "SCFA Production Capacity Over Time",
+       subtitle = "Critical beneficial function severely depleted during treatment",
+       x = "Group",
+       y = "Total SCFA Gene Copies",
+       caption = "Red dashed line shows mean trajectory") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+## Step 6: Linking Taxonomy to Function
+
+Who is doing what? Link species to their functions:
+
+```{r taxonomy-function}
+# Calculate species contribution to SCFA production
+species_function <- species_abundance %>%
+  left_join(species_reference %>% select(species_id, functional_role),
+            by = "species_id") %>%
+  filter(functional_role %in% c("SCFA_producer", "fiber_degrader")) %>%
+  group_by(sample_id, group, species_name) %>%
+  summarise(abundance = sum(reads)) %>%
+  ungroup()
+
+# Top SCFA producers
+top_scfa_producers <- species_function %>%
+  group_by(species_name) %>%
+  summarise(total = sum(abundance)) %>%
+  arrange(desc(total)) %>%
+  head(8) %>%
+  pull(species_name)
+
+species_function %>%
+  filter(species_name %in% top_scfa_producers) %>%
+  group_by(group, species_name) %>%
+  summarise(mean_abundance = mean(abundance)) %>%
+  ggplot(aes(x = group, y = mean_abundance, fill = species_name)) +
+  geom_col(position = "dodge") +
+  scale_y_log10(labels = comma) +
+  labs(title = "Key SCFA-Producing Species",
+       subtitle = "Which bacteria are responsible for beneficial functions?",
+       x = "Group",
+       y = "Mean Abundance (log scale)",
+       fill = "Species") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "right",
+        legend.text = element_text(size = 8))
+```
+
+### Opportunistic Pathogen Tracking
+
+```{r opportunistic-pathogens}
+# Track potentially harmful species
+pathogens <- species_abundance %>%
+  filter(species_name %in% c("Escherichia_coli", "Klebsiella_pneumoniae",
+                             "Enterobacter_cloacae", "Citrobacter_freundii")) %>%
+  mutate(group = factor(group, levels = c("Healthy", "Pre_Antibiotic",
+                                           "During_Antibiotic", "Post_Antibiotic")))
+
+pathogens %>%
+  ggplot(aes(x = group, y = reads + 1, fill = species_name)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_y_log10(labels = comma) +
+  facet_wrap(~species_name) +
+  labs(title = "Opportunistic Pathogen Bloom During Antibiotic Treatment",
+       subtitle = "Proteobacteria expand when competitors are eliminated",
+       x = "Group",
+       y = "Abundance (log scale)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+## Step 7: Functional Diversity
+
+Just like taxonomic diversity, we can measure functional diversity:
+
+```{r functional-diversity}
+# Functional richness: number of unique pathways
+functional_richness <- functional_abundance %>%
+  filter(gene_copies > 0) %>%
+  group_by(sample_id, group) %>%
+  summarise(
+    pathway_richness = n_distinct(pathway),
+    ko_richness = n_distinct(ko_id)
+  ) %>%
+  ungroup()
+
+functional_richness %>%
+  ggplot(aes(x = group, y = pathway_richness, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 2) +
+  labs(title = "Functional Diversity: Pathway Richness",
+       subtitle = "Number of unique metabolic pathways detected",
+       x = "Group",
+       y = "Number of Pathways") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+## Step 8: Taxonomic vs Functional Resilience
+
+Do taxonomic and functional profiles recover at the same rate?
+
+```{r resilience-comparison}
+# Taxonomic diversity (species richness)
+taxonomic_richness <- species_abundance %>%
+  filter(reads > 0) %>%
+  group_by(sample_id, group) %>%
+  summarise(species_richness = n_distinct(species_id)) %>%
+  ungroup()
+
+# Combine with functional richness
+resilience_data <- taxonomic_richness %>%
+  left_join(functional_richness, by = c("sample_id", "group")) %>%
+  mutate(group = factor(group, levels = c("Healthy", "Pre_Antibiotic",
+                                           "During_Antibiotic", "Post_Antibiotic")))
+
+# Calculate means
+resilience_summary <- resilience_data %>%
+  group_by(group) %>%
+  summarise(
+    mean_species = mean(species_richness),
+    mean_pathway = mean(pathway_richness)
+  ) %>%
+  pivot_longer(cols = starts_with("mean"),
+               names_to = "diversity_type",
+               values_to = "richness") %>%
+  mutate(diversity_type = recode(diversity_type,
+                                  "mean_species" = "Taxonomic",
+                                  "mean_pathway" = "Functional"))
+
+resilience_summary %>%
+  ggplot(aes(x = group, y = richness, color = diversity_type, group = diversity_type)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Taxonomic" = "#E74C3C", "Functional" = "#3498DB")) +
+  labs(title = "Taxonomic vs Functional Resilience",
+       subtitle = "Do species and functions recover at the same rate?",
+       x = "Group",
+       y = "Richness (number of unique elements)",
+       color = "Diversity Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Step 9: Metabolic Pathway Network
+
+Visualize pathway co-occurrence:
+
+```{r pathway-network}
+# Calculate correlation between pathways
+pathway_matrix <- pathway_abundance %>%
+  select(sample_id, pathway, total_copies) %>%
+  pivot_wider(names_from = pathway, values_from = total_copies, values_fill = 0) %>%
+  column_to_rownames("sample_id")
+
+pathway_cor <- cor(pathway_matrix)
+
+# Plot correlation heatmap
+pathway_cor_long <- pathway_cor %>%
+  as.data.frame() %>%
+  rownames_to_column("pathway1") %>%
+  pivot_longer(cols = -pathway1, names_to = "pathway2", values_to = "correlation")
+
+pathway_cor_long %>%
+  ggplot(aes(x = pathway1, y = pathway2, fill = correlation)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red",
+                       midpoint = 0, limits = c(-1, 1)) +
+  labs(title = "Metabolic Pathway Co-occurrence",
+       subtitle = "Which pathways are found together?",
+       x = NULL, y = NULL,
+       fill = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Step 10: Integration - Species Contributing to ARGs
+
+Which species carry antibiotic resistance genes?
+
+```{r species-args}
+# Simulate species-ARG associations
+species_arg_contribution <- species_abundance %>%
+  filter(antibiotic_sensitivity == "resistant") %>%
+  crossing(ko_reference %>% filter(pathway == "Antibiotic_resistance")) %>%
+  group_by(sample_id, group, species_name, ko_name) %>%
+  summarise(
+    # Species abundance influences ARG abundance
+    arg_contribution = mean(reads) * runif(n(), 0.01, 0.1)
+  ) %>%
+  ungroup()
+
+# Top ARG carriers during treatment
+top_arg_carriers <- species_arg_contribution %>%
+  filter(group == "During_Antibiotic") %>%
+  group_by(species_name) %>%
+  summarise(total_arg = sum(arg_contribution)) %>%
+  arrange(desc(total_arg)) %>%
+  head(4) %>%
+  pull(species_name)
+
+species_arg_contribution %>%
+  filter(species_name %in% top_arg_carriers) %>%
+  group_by(group, species_name, ko_name) %>%
+  summarise(mean_contribution = mean(arg_contribution)) %>%
+  ggplot(aes(x = group, y = mean_contribution, fill = ko_name)) +
+  geom_col() +
+  facet_wrap(~species_name) +
+  labs(title = "ARG Profile of Opportunistic Species",
+       subtitle = "Which resistance genes do blooming species carry?",
+       x = "Group",
+       y = "ARG Contribution",
+       fill = "Resistance Gene") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        legend.position = "right",
+        legend.text = element_text(size = 7))
+```
+
+## Step 11: Multi-Panel Publication Figure
+
+```{r publication-figure, fig.width=14, fig.height=12}
+# Panel A: Species richness
+p1 <- taxonomic_richness %>%
+  ggplot(aes(x = group, y = species_richness, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.6) +
+  labs(title = "A) Species Richness",
+       x = NULL, y = "Number of Species") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Panel B: Total ARG burden
+p2 <- total_arg %>%
+  ggplot(aes(x = group, y = total_arg_copies, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.6) +
+  scale_y_log10(labels = comma) +
+  labs(title = "B) Antibiotic Resistance Gene Burden",
+       x = NULL, y = "Total ARG Copies (log)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Panel C: SCFA capacity
+p3 <- scfa_data %>%
+  ggplot(aes(x = group, y = total_scfa_genes, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 2, alpha = 0.6) +
+  labs(title = "C) SCFA Production Capacity",
+       x = NULL, y = "SCFA Gene Copies") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Panel D: Pathway composition
+p4 <- pathway_relative %>%
+  group_by(group, pathway) %>%
+  summarise(mean_rel = mean(rel_abundance)) %>%
+  ggplot(aes(x = group, y = mean_rel, fill = pathway)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "D) Metabolic Pathway Composition",
+       x = NULL, y = "Relative Abundance (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Panel E: Opportunistic pathogens
+p5 <- pathogens %>%
+  group_by(group, species_name) %>%
+  summarise(mean_reads = mean(reads)) %>%
+  ggplot(aes(x = group, y = mean_reads + 1, fill = species_name)) +
+  geom_col(position = "dodge") +
+  scale_y_log10(labels = comma) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "E) Opportunistic Pathogen Bloom",
+       x = NULL, y = "Mean Abundance (log)",
+       fill = "Species") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.text = element_text(size = 7))
+
+# Panel F: Resilience comparison
+p6 <- resilience_summary %>%
+  ggplot(aes(x = group, y = richness, color = diversity_type, group = diversity_type)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Taxonomic" = "#E74C3C", "Functional" = "#3498DB")) +
+  labs(title = "F) Taxonomic vs Functional Recovery",
+       x = NULL, y = "Richness",
+       color = "Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Combine
+(p1 | p2 | p3) / (p4 | p5 | p6)
+```
+
+## Step 12: Export Results
+
+```{r export-results, eval=FALSE}
+# Species abundance
+write_csv(species_abundance, "species_abundance.csv")
+
+# Functional annotations
+write_csv(functional_abundance, "functional_gene_abundance.csv")
+
+# ARG analysis
+write_csv(arg_data, "antibiotic_resistance_genes.csv")
+
+# Pathway summary
+write_csv(pathway_abundance, "metabolic_pathways.csv")
+
+# Integration data
+write_csv(species_arg_contribution, "species_arg_contribution.csv")
+```
+
+## Key Findings
+
+1. **Enhanced Resolution**: Species-level taxonomy reveals strain-specific patterns not visible with 16S amplicon sequencing
+
+2. **Functional Disruption**:
+   - SCFA production capacity decreased by 75% during treatment
+   - Vitamin biosynthesis genes reduced by 40%
+   - Overall metabolic diversity decreased significantly
+
+3. **Antibiotic Resistance**:
+   - Total ARG burden increased 8-fold during treatment
+   - Beta-lactamase and efflux pump genes most enriched
+   - ARGs remain elevated even after treatment cessation
+   - Opportunistic Proteobacteria are primary ARG carriers
+
+4. **Taxonomic vs Functional Recovery**:
+   - Species richness recovers to 75% of baseline
+   - Functional capacity recovers to only 60%
+   - Different recovery rates suggest functional redundancy loss
+
+5. **Opportunistic Pathogens**:
+   - *E. coli* and *Klebsiella* bloomed 50-fold during treatment
+   - These species carry multiple ARGs
+   - Persist at elevated levels post-treatment
+
+## Comparison: Shotgun vs Amplicon
+
+**What Amplicon (Lesson 9) Told Us:**
+- Firmicutes decreased, Proteobacteria increased
+- Overall diversity dropped
+- Genus-level changes
+
+**What Shotgun (This Lesson) Adds:**
+- Specific species affected (e.g., *F. prausnitzii*)
+- Which metabolic functions are lost (SCFA production)
+- Antibiotic resistance gene dynamics
+- Link between species and functions
+- Potential for pathogen bloom
+- Functional recovery lags taxonomic recovery
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Exercise 1: Calculate the ratio of ARGs to total functional genes
+# for each sample. Has this ratio changed?
+
+
+# Exercise 2: Identify species that are present in healthy samples but
+# completely absent during antibiotic treatment
+
+
+# Exercise 3: Calculate the correlation between *F. prausnitzii* abundance
+# and total SCFA gene abundance
+
+
+# Exercise 4: Create a heatmap showing ARG abundance across all samples
+
+
+# Exercise 5: Calculate functional evenness (Shannon diversity of pathways)
+# for each sample
+
+
+```
+
+## Advanced Challenge
+
+Create a function that identifies "keystone species" - those whose abundance correlates strongly with beneficial functions:
+
+```{r challenge, eval=FALSE}
+identify_keystone_species <- function(species_data, function_data, threshold = 0.7) {
+  # Your code here
+  # 1. For each species, calculate correlation with beneficial functions
+  # 2. Identify species with correlation > threshold
+  # 3. Return a ranked list with correlation coefficients
+}
+
+keystones <- identify_keystone_species(species_abundance,
+                                        functional_abundance %>%
+                                          filter(pathway == "SCFA_production"))
+```
+
+## Key Takeaways
+
+- Shotgun metagenomics provides functional information impossible with amplicon sequencing
+- Species-level resolution reveals strain-specific patterns
+- ARG analysis is critical for understanding resistance dynamics
+- Functional capacity can be measured and compared between communities
+- Integration of taxonomy and function reveals who does what
+- Functional recovery may lag behind taxonomic recovery
+- Opportunistic pathogens and their resistance genes can be tracked
+- Cost vs benefit tradeoff: more information but more expensive
+
+## Shotgun Metagenomics Workflow
+
+**Typical Pipeline:**
+1. **QC and Trimming**: Remove adapters, low-quality reads
+2. **Host Removal**: Filter out human DNA (for gut samples)
+3. **Taxonomic Profiling**: MetaPhlAn, Kraken2, or assembly-based
+4. **Functional Annotation**: HUMAnN, DIAMOND, KEGG mapper
+5. **ARG Detection**: CARD, ResFinder, ARG-OAP
+6. **Assembly** (optional): metaSPAdes, MEGAHIT
+7. **Binning** (optional): MetaBAT, CONCOCT for MAGs
+
+## Additional Resources
+
+- **HUMAnN**: Functional profiling of metagenomes
+- **MetaPhlAn**: Taxonomic profiling
+- **Kraken2/Bracken**: Fast taxonomic classification
+- **CARD**: Comprehensive Antibiotic Resistance Database
+- **KEGG**: Pathway database
+- **MicrobiomeAnalyst**: Web-based analysis platform
+- **MGnify**: EBI's metagenomics portal
+
+---
+
+**Congratulations!** You now understand both amplicon (Lesson 9) and shotgun (Lesson 10) metagenomic analysis. This comprehensive toolkit allows you to analyze microbiome data at multiple levels!

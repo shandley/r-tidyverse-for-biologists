@@ -1,0 +1,481 @@
+---
+title: "Lesson 6: Joining and Reshaping Data"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. Join two datasets using `left_join()`, `right_join()`, `inner_join()`, and `full_join()`
+2. Understand the difference between join types
+3. Convert data from wide to long format with `pivot_longer()`
+4. Convert data from long to wide format with `pivot_wider()`
+5. Recognize when to use each format
+6. Apply these skills to real biological data scenarios
+
+## Setup
+
+```{r load-packages}
+library(tidyverse)
+```
+
+## Why Join Data?
+
+In real research, data is often spread across multiple files:
+
+- Sample metadata in one file
+- Experimental measurements in another
+- Treatment information in a third
+
+We need to **join** these tables together for analysis!
+
+## Example Datasets
+
+Let's create example datasets from a microbiology experiment:
+
+```{r create-data}
+# Sample information
+samples <- tibble(
+  sample_id = c("S001", "S002", "S003", "S004", "S005"),
+  treatment = c("control", "control", "antibiotic_A", "antibiotic_A", "antibiotic_B"),
+  time_hr = c(24, 24, 24, 24, 24)
+)
+
+# Bacterial counts (missing S005!)
+cell_counts <- tibble(
+  sample_id = c("S001", "S002", "S003", "S004"),
+  cfu_ml = c(1.2e8, 1.3e8, 3.5e6, 4.1e6)
+)
+
+# RNA-seq data (includes extra sample S006!)
+rnaseq <- tibble(
+  sample_id = c("S001", "S002", "S003", "S006"),
+  gene_expression = c(234, 245, 1023, 890)
+)
+
+samples
+cell_counts
+rnaseq
+```
+
+## Types of Joins
+
+### left_join(): Keep All Rows from Left Table
+
+Most common join! Keeps everything from the first (left) table.
+
+```{r left-join}
+# Keep all samples, add cell counts where available
+samples %>%
+  left_join(cell_counts, by = "sample_id")
+```
+
+Notice: S005 is kept but has `NA` for cfu_ml (no matching data).
+
+### right_join(): Keep All Rows from Right Table
+
+```{r right-join}
+# Keep all cell counts, add sample info
+cell_counts %>%
+  right_join(samples, by = "sample_id")
+```
+
+This is the same as `samples %>% left_join(cell_counts)` - just reversed!
+
+### inner_join(): Keep Only Matching Rows
+
+```{r inner-join}
+# Only samples with BOTH sample info AND cell counts
+samples %>%
+  inner_join(cell_counts, by = "sample_id")
+```
+
+S005 is excluded because it has no cell count data.
+
+### full_join(): Keep All Rows from Both Tables
+
+```{r full-join}
+# Keep everything!
+samples %>%
+  full_join(rnaseq, by = "sample_id")
+```
+
+All rows are kept, with NAs where data is missing.
+
+## Visual Guide to Joins
+
+```
+Left Table:    Right Table:
+A              B
+B              C
+C              D
+
+left_join:  A (no match from right)
+            B (matched)
+            C (matched)
+
+inner_join: B (matched)
+            C (matched)
+
+full_join:  A (no match from right)
+            B (matched)
+            C (matched)
+            D (no match from left)
+```
+
+## Joining Multiple Tables
+
+```{r multiple-joins}
+# Combine all three tables
+complete_data <- samples %>%
+  left_join(cell_counts, by = "sample_id") %>%
+  left_join(rnaseq, by = "sample_id")
+
+complete_data
+```
+
+## Joining by Multiple Columns
+
+Sometimes you need to match on multiple columns:
+
+```{r multi-column-join}
+# Experiment with replicates
+experiment1 <- tibble(
+  sample_id = c("A", "A", "B", "B"),
+  replicate = c(1, 2, 1, 2),
+  od600 = c(0.8, 0.9, 0.7, 0.8)
+)
+
+experiment2 <- tibble(
+  sample_id = c("A", "A", "B", "B"),
+  replicate = c(1, 2, 1, 2),
+  protein_mg = c(1.2, 1.3, 1.0, 1.1)
+)
+
+# Join by BOTH sample_id AND replicate
+experiment1 %>%
+  left_join(experiment2, by = c("sample_id", "replicate"))
+```
+
+## Handling Different Column Names
+
+```{r different-names}
+# Column names don't match
+table1 <- tibble(
+  strain = c("WT", "mutA", "mutB"),
+  growth_rate = c(0.8, 0.6, 0.9)
+)
+
+table2 <- tibble(
+  strain_name = c("WT", "mutA", "mutB"),  # Different column name!
+  resistance = c("sensitive", "resistant", "sensitive")
+)
+
+# Specify which columns to match
+table1 %>%
+  left_join(table2, by = c("strain" = "strain_name"))
+```
+
+## Real-World Example: PCR Results
+
+```{r pcr-example}
+# Sample metadata
+metadata <- tibble(
+  well = c("A1", "A2", "A3", "B1", "B2", "B3"),
+  patient_id = c("P001", "P002", "P003", "P001", "P002", "P003"),
+  gene = c("actb", "actb", "actb", "il6", "il6", "il6")
+)
+
+# qPCR Ct values
+qpcr_results <- tibble(
+  well = c("A1", "A2", "A3", "B1", "B2", "B3"),
+  ct_value = c(18.2, 18.5, 18.3, 24.5, 22.1, 23.8)
+)
+
+# Combine
+pcr_data <- metadata %>%
+  left_join(qpcr_results, by = "well")
+
+pcr_data
+
+# Calculate delta-delta Ct
+pcr_data %>%
+  pivot_wider(names_from = gene, values_from = ct_value) %>%
+  mutate(
+    delta_ct = il6 - actb,
+    fold_change = 2^(-delta_ct)
+  )
+```
+
+## Wide vs Long Data
+
+### Wide Format
+
+Each variable has its own column. Common in spreadsheets.
+
+```{r wide-data}
+# Growth data in wide format (each timepoint is a column)
+growth_wide <- tibble(
+  strain = c("WT", "mutant_A", "mutant_B"),
+  hr_0 = c(0.05, 0.05, 0.05),
+  hr_2 = c(0.3, 0.2, 0.35),
+  hr_4 = c(0.8, 0.5, 0.9),
+  hr_6 = c(1.2, 0.8, 1.3)
+)
+
+growth_wide
+```
+
+### Long Format
+
+One row per observation. Better for ggplot2 and dplyr!
+
+```{r long-data}
+# Same data in long format
+growth_long <- tibble(
+  strain = rep(c("WT", "mutant_A", "mutant_B"), each = 4),
+  timepoint_hr = rep(c(0, 2, 4, 6), times = 3),
+  od600 = c(
+    0.05, 0.3, 0.8, 1.2,    # WT
+    0.05, 0.2, 0.5, 0.8,    # mutant_A
+    0.05, 0.35, 0.9, 1.3    # mutant_B
+  )
+)
+
+growth_long
+```
+
+## pivot_longer(): Wide to Long
+
+Convert wide data to long format:
+
+```{r pivot-longer}
+growth_wide %>%
+  pivot_longer(
+    cols = starts_with("hr_"),      # Which columns to pivot
+    names_to = "timepoint",          # Name for the new category column
+    values_to = "od600"              # Name for the new value column
+  )
+```
+
+Clean up the timepoint column:
+
+```{r pivot-longer-clean}
+growth_long_clean <- growth_wide %>%
+  pivot_longer(
+    cols = starts_with("hr_"),
+    names_to = "timepoint",
+    values_to = "od600",
+    names_prefix = "hr_",            # Remove "hr_" prefix
+    names_transform = list(timepoint = as.numeric)  # Convert to number
+  )
+
+growth_long_clean
+
+# Now we can plot!
+ggplot(growth_long_clean, aes(x = timepoint, y = od600, color = strain)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Bacterial Growth Curves",
+       x = "Time (hours)",
+       y = "OD600") +
+  theme_minimal()
+```
+
+## pivot_wider(): Long to Wide
+
+Convert long data to wide format:
+
+```{r pivot-wider}
+growth_long %>%
+  pivot_wider(
+    names_from = timepoint_hr,      # Column to make into new columns
+    values_from = od600,             # Values to fill
+    names_prefix = "hr_"             # Add prefix to new column names
+  )
+```
+
+## Real Example: Gene Expression
+
+```{r gene-expression}
+# Gene expression data (long format)
+expression_long <- tibble(
+  sample = rep(c("control_1", "control_2", "treated_1", "treated_2"), each = 3),
+  gene = rep(c("geneA", "geneB", "geneC"), times = 4),
+  fpkm = c(
+    123, 456, 789,   # control_1
+    134, 445, 801,   # control_2
+    890, 234, 120,   # treated_1
+    912, 245, 115    # treated_2
+  )
+)
+
+expression_long
+
+# Convert to wide format for easier comparison
+expression_wide <- expression_long %>%
+  pivot_wider(
+    names_from = gene,
+    values_from = fpkm
+  )
+
+expression_wide
+
+# Calculate fold changes
+expression_wide %>%
+  mutate(
+    treatment = str_extract(sample, "control|treated"),
+    replicate = str_extract(sample, "\\d")
+  ) %>%
+  select(-sample) %>%
+  group_by(treatment) %>%
+  summarise(across(starts_with("gene"), mean))
+```
+
+## Complex Reshaping: Multiple Value Columns
+
+```{r complex-reshape}
+# Data with multiple measurements
+assay_data <- tibble(
+  sample = c("S1", "S2", "S3"),
+  control_mean = c(100, 105, 98),
+  control_sd = c(5, 6, 4),
+  treated_mean = c(150, 145, 155),
+  treated_sd = c(8, 7, 9)
+)
+
+assay_data
+
+# Reshape to long format
+assay_long <- assay_data %>%
+  pivot_longer(
+    cols = -sample,
+    names_to = c("condition", "statistic"),
+    names_sep = "_",
+    values_to = "value"
+  )
+
+assay_long
+
+# Reshape back, but differently
+assay_long %>%
+  pivot_wider(
+    names_from = statistic,
+    values_from = value
+  )
+```
+
+## When to Use Each Format
+
+**Use LONG format for:**
+
+- Plotting with ggplot2
+- Group-wise calculations with dplyr
+- Statistical models
+- Most data analysis tasks
+
+**Use WIDE format for:**
+
+- Data entry
+- Easy viewing in spreadsheets
+- Some specific analyses
+- Presenting tables
+
+**Rule of thumb**: Work in long format, present in wide format!
+
+## Practice Exercises
+
+```{r exercises, eval=FALSE}
+# Create practice data
+patients <- tibble(
+  patient_id = c("P001", "P002", "P003"),
+  age = c(45, 52, 38),
+  sex = c("F", "M", "F")
+)
+
+lab_results <- tibble(
+  patient_id = c("P001", "P002", "P003"),
+  glucose = c(95, 102, 88),
+  cholesterol = c(185, 220, 175)
+)
+
+# Exercise 1: Join patients and lab_results
+
+
+# Exercise 2: Convert lab_results to long format with test_type and value columns
+
+
+# Exercise 3: Create a dataset with gene expression at 3 timepoints (wide),
+#             then convert to long format
+
+
+# Exercise 4: Join two tables where one has missing samples - use the
+#             appropriate join to keep only complete cases
+
+
+```
+
+## Common Pitfalls
+
+### 1. Duplicate Keys in Joins
+
+```{r pitfall-duplicate}
+# This creates a problem!
+table_a <- tibble(
+  id = c("A", "A", "B"),  # A appears twice!
+  value = c(1, 2, 3)
+)
+
+table_b <- tibble(
+  id = c("A", "B"),
+  label = c("first", "second")
+)
+
+table_a %>%
+  left_join(table_b, by = "id")
+# Each "A" gets matched with "first"
+```
+
+### 2. Forgetting to Specify Join Column
+
+```{r pitfall-column, eval=FALSE}
+# If column names match, by is optional but be explicit!
+table1 %>%
+  left_join(table2, by = "id")  # Good!
+
+table1 %>%
+  left_join(table2)  # Works but less clear
+```
+
+## Key Takeaways
+
+- **Joins** combine data from multiple tables
+  - `left_join()`: Keep all from left table (most common)
+  - `inner_join()`: Keep only matches
+  - `full_join()`: Keep everything
+- **Long format** is best for analysis (one row per observation)
+- **Wide format** is best for presentation (one row per unit)
+- `pivot_longer()`: wide → long
+- `pivot_wider()`: long → wide
+- Most real-world analyses involve both joining and reshaping
+
+## Next Steps
+
+In Lesson 7, we'll put everything together in a complete case study analyzing real biological data from start to finish!
+
+---
+
+**Homework:**
+
+1. Create two related datasets (e.g., sample info and measurements)
+2. Join them using an appropriate join type
+3. Reshape the result from wide to long or vice versa
+4. Create a plot using the reshaped data
+5. Write a brief explanation of why you chose that particular join type
