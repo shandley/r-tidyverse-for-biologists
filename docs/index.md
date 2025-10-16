@@ -9,7 +9,7 @@ A comprehensive course on data analysis using R and the tidyverse, designed for 
 
 **Platform:** [posit.cloud](https://posit.cloud) | **Level:** Beginner to Intermediate | **Duration:** ~40-50 hours
 
-[📚 View Full Course Documentation](../README.md) | [💬 Join Discussions](https://github.com/shandley/r-tidyverse-for-biologists/discussions) | [⭐ Star on GitHub](https://github.com/shandley/r-tidyverse-for-biologists)
+[📚 View Full Course Documentation](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/README.md) | [💬 Join Discussions](https://github.com/shandley/r-tidyverse-for-biologists/discussions) | [⭐ Star on GitHub](https://github.com/shandley/r-tidyverse-for-biologists)
 
 ---
 
@@ -18,22 +18,22 @@ A comprehensive course on data analysis using R and the tidyverse, designed for 
 ### Block 1: Core Foundations
 **Essential R and tidyverse skills for data manipulation and visualization**
 
-1. [Introduction to R and RMarkdown](../lesson01_intro_to_R_and_RMarkdown.Rmd)
+1. [Introduction to R and RMarkdown](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson01_intro_to_R_and_RMarkdown.Rmd)
    - R basics, vectors, functions, RMarkdown syntax
 
-2. [Data Import and Exploration](../lesson02_data_import_exploration.Rmd)
+2. [Data Import and Exploration](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson02_data_import_exploration.Rmd)
    - Loading tidyverse, reading CSV files, initial exploration
 
-3. [Data Transformation with dplyr](../lesson03_data_transformation.Rmd)
+3. [Data Transformation with dplyr](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson03_data_transformation.Rmd)
    - filter(), select(), mutate(), arrange(), pipe operator
 
-4. [Grouping and Summarizing Data](../lesson04_grouping_summarizing.Rmd)
+4. [Grouping and Summarizing Data](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson04_grouping_summarizing.Rmd)
    - group_by(), summarise(), count(), group transformations
 
-5. [Data Visualization with ggplot2](../lesson05_data_visualization.Rmd)
+5. [Data Visualization with ggplot2](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson05_data_visualization.Rmd)
    - Grammar of Graphics, plots, themes, faceting
 
-6. [Joining and Reshaping Data](../lesson06_joining_reshaping.Rmd)
+6. [Joining and Reshaping Data](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson06_joining_reshaping.Rmd)
    - Joins, pivot_longer(), pivot_wider(), tidy data
 
 ---
@@ -41,13 +41,13 @@ A comprehensive course on data analysis using R and the tidyverse, designed for 
 ### Block 2: Essential Tools
 **Additional tidyverse packages and reproducible research practices**
 
-7. [Text Data with stringr](../lesson07_stringr_text_data.Rmd)
+7. [Text Data with stringr](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson07_stringr_text_data.Rmd)
    - String manipulation, regex, gene IDs, DNA sequences
 
-8. [Time Series with lubridate](../lesson08_lubridate_time_series.Rmd)
+8. [Time Series with lubridate](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson08_lubridate_time_series.Rmd)
    - Date/time parsing, date arithmetic, longitudinal data
 
-9. [Reproducible Research](../lesson09_reproducible_research.Rmd)
+9. [Reproducible Research](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson09_reproducible_research.Rmd)
    - R Projects, here package, renv, parameterized reports
 
 ---
@@ -55,10 +55,10 @@ A comprehensive course on data analysis using R and the tidyverse, designed for 
 ### Block 3: Statistics and Modeling
 **Statistical analysis using tidyverse-compatible approaches**
 
-10. [Statistical Testing](../lesson10_statistical_testing.Rmd)
+10. [Statistical Testing](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson10_statistical_testing.Rmd)
     - t-tests, ANOVA, non-parametric tests, multiple testing correction
 
-11. [Linear Models and GLMs](../lesson11_linear_models_glms.Rmd)
+11. [Linear Models and GLMs](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson11_linear_models_glms.Rmd)
     - Linear regression, logistic regression, Poisson regression
 
 ---
@@ -66,16 +66,16 @@ A comprehensive course on data analysis using R and the tidyverse, designed for 
 ### Block 4: Advanced Methods
 **Advanced tidyverse techniques and machine learning**
 
-12. [Functional Programming with purrr](../lesson12_purrr_functional_programming.Rmd)
+12. [Functional Programming with purrr](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson12_purrr_functional_programming.Rmd)
     - map() family, iteration, error handling, list columns
 
-13. [Advanced tidyr with Nested Data](../lesson13_advanced_tidyr_nested.Rmd)
+13. [Advanced tidyr with Nested Data](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson13_advanced_tidyr_nested.Rmd)
     - nest(), unnest(), list columns with models and plots
 
-14. [Machine Learning with tidymodels](../lesson14_machine_learning_tidymodels.Rmd)
+14. [Machine Learning with tidymodels](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson14_machine_learning_tidymodels.Rmd)
     - tidymodels workflow, cross-validation, hyperparameter tuning
 
-15. [Complete Analysis Case Study](../lesson15_case_study.Rmd)
+15. [Complete Analysis Case Study](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson15_case_study.Rmd)
     - Antibiotic resistance in *E. coli* - integrating all skills
 
 ---
@@ -83,13 +83,13 @@ A comprehensive course on data analysis using R and the tidyverse, designed for 
 ### Block 5: Domain-Specific Applications
 **Real-world biological data analysis workflows**
 
-16. [RNA-seq Analysis](../lesson16_rnaseq_case_study.Rmd)
+16. [RNA-seq Analysis](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson16_rnaseq_case_study.Rmd)
     - Gene expression, PCA, differential expression, volcano plots
 
-17. [Microbiome Analysis (16S Amplicon)](../lesson17_microbiome_case_study.Rmd)
+17. [Microbiome Analysis (16S Amplicon)](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson17_microbiome_case_study.Rmd)
     - Alpha/beta diversity, taxonomic composition, differential abundance
 
-18. [Metagenomics Analysis (Shotgun)](../lesson18_metagenomics_case_study.Rmd)
+18. [Metagenomics Analysis (Shotgun)](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/lesson18_metagenomics_case_study.Rmd)
     - Functional annotation, pathway analysis, ARG profiling
 
 ---
@@ -149,7 +149,7 @@ Have suggestions? Found an issue? Want to contribute a new case study?
 
 ## 📄 License
 
-This course is licensed under the [MIT License](../LICENSE). Feel free to use and adapt these materials with attribution.
+This course is licensed under the [MIT License](https://github.com/shandley/r-tidyverse-for-biologists/blob/main/LICENSE). Feel free to use and adapt these materials with attribution.
 
 ---
 
